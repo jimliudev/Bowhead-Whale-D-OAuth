@@ -11,7 +11,7 @@ import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { SEAL_PACKAGE_ID } from '../config'
 import { contractService } from '../services/contractService'
 import './css/PageLayout.css'
-import './css/DOAuthPage.css'
+import './css/DOAuthPageNewWindow.css'
 
 const suiClient = new SuiClient({
   url: getFullnodeUrl('testnet'),
@@ -29,9 +29,50 @@ export default function DOAuthPage() {
   const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
+    // Resize and position window to top-right corner (like Chrome extension popup)
+    const resizeWindow = () => {
+      try {
+        // Check if this is a popup window
+        const isPopup = window.opener !== null || window.name === 'oauth_popup'
+        
+        if (isPopup) {
+          const width = 480
+          const height = 600
+          const screenWidth = window.screen.availWidth
+          
+          // Calculate position for top-right corner
+          const left = screenWidth - width - 20 // 20px margin from right edge
+          const top = 20 // 20px margin from top
+          
+          // Resize and move window
+          // Note: These methods might be blocked by browser security policies
+          // They work best when called from a user-initiated action
+          try {
+            window.resizeTo(width, height)
+            window.moveTo(left, top)
+          } catch (e) {
+            // If resize/move is blocked, try to set window size via CSS
+            console.log('Window resize/move blocked by browser, using CSS fallback')
+          }
+        }
+      } catch (error) {
+        console.log('Window resize error:', error)
+      }
+    }
+
+    // Try to resize immediately
+    resizeWindow()
+
+    // Also try after delays (in case window isn't ready)
+    const timeoutId1 = setTimeout(resizeWindow, 100)
+    const timeoutId2 = setTimeout(resizeWindow, 500)
+
     // Add class to body to override default styles
     document.body.classList.add('page-container-active')
+    
     return () => {
+      clearTimeout(timeoutId1)
+      clearTimeout(timeoutId2)
       // Remove class when component unmounts
       document.body.classList.remove('page-container-active')
     }
@@ -268,17 +309,43 @@ export default function DOAuthPage() {
 
       setStatus('✅ Authorization successful! Redirecting...')
 
-      // Redirect to service's redirect URL with access token
+      // Prepare redirect URL
       const redirectUrl = new URL(serviceInfo.redirectUrl)
       redirectUrl.searchParams.set('access_token', accessToken)
       if (grantId) {
         redirectUrl.searchParams.set('grant_id', grantId)
       }
 
-      // Wait a moment for user to see success message
-      setTimeout(() => {
-        window.location.href = redirectUrl.toString()
-      }, 2000)
+      // If this is a popup window, send message to parent and close
+      if (window.opener && !window.opener.closed) {
+        // Send success message to parent window (OAuthTriggerPage)
+        try {
+          window.opener.postMessage({
+            type: 'OAUTH_SUCCESS',
+            accessToken,
+            grantId,
+            redirectUrl: redirectUrl.toString(),
+            serviceId: serviceInfo.id,
+          }, window.location.origin)
+        } catch (e) {
+          console.log('Failed to send message to parent:', e)
+        }
+        
+        // Wait a moment for user to see success message, then close popup and redirect parent
+        setTimeout(() => {
+          try {
+            window.opener.location.href = redirectUrl.toString()
+          } catch (e) {
+            console.log('Failed to redirect parent:', e)
+          }
+          window.close()
+        }, 1500)
+      } else {
+        // Normal redirect if not a popup
+        setTimeout(() => {
+          window.location.href = redirectUrl.toString()
+        }, 2000)
+      }
     } catch (err: any) {
       const errorMsg = err?.message || err?.toString() || 'Authorization failed'
       setError(`Authorization failed: ${errorMsg}`)
@@ -479,7 +546,21 @@ export default function DOAuthPage() {
                 <div className="oauth-footer">
                   <button
                     className="oauth-button oauth-button-secondary"
-                    onClick={() => window.history.back()}
+                    onClick={() => {
+                      // If this is a popup window, send cancel message and close it
+                      if (window.opener && !window.opener.closed) {
+                        try {
+                          window.opener.postMessage({
+                            type: 'OAUTH_CANCELLED',
+                          }, window.location.origin)
+                        } catch (e) {
+                          console.log('Failed to send cancel message:', e)
+                        }
+                        window.close()
+                      } else {
+                        window.history.back()
+                      }
+                    }}
                     disabled={loading}
                   >
                     Cancel

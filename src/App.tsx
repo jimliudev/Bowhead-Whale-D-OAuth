@@ -7,6 +7,8 @@ import SealTestPage from './pages/Test/SealTestPage'
 import ThirdPartyServicePage from './pages/ThirdPartyServicePage'
 import UserPage from './pages/UserPage'
 import DOAuthPage from './pages/DOAuthPage'
+import DOAuthPageNewWindow from './pages/DOAuthPageNewWindow'
+import OAuthTriggerPage from './pages/OAuthTriggerPage'
 import './App.css'
 
 function App() {
@@ -21,6 +23,8 @@ function App() {
         <Route path="/bowheadwhale/thirdparty-service" element={<ThirdPartyServicePage />} />
         <Route path="/bowheadwhale/user" element={<UserPage />} />
         <Route path="/bowheadwhale/doauth_page" element={<DOAuthPage />} />
+        <Route path="/bowheadwhale/doauth_page_new_window" element={<DOAuthPageNewWindow />} />
+        <Route path="/bowheadwhale/oauth_trigger" element={<OAuthTriggerPage />} />
       </Routes>
     </BrowserRouter>
   )

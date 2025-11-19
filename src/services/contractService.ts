@@ -72,6 +72,27 @@ export class ContractService {
   }
 
   /**
+   * Create a read-only capability for a vault
+   */
+  buildCreateReadOnlyCapTx(params: {
+    vaultId: string
+    expiresAt: number
+    serviceAddress: string
+  }): Transaction {
+    const tx = new Transaction()
+    tx.moveCall({
+      target: `${this.packageId}::seal_private_data::create_readonly_cap_entry`,
+      arguments: [
+        tx.object(params.vaultId),
+        tx.pure.u64(params.expiresAt),
+        tx.object('0x6'), // Clock
+        tx.pure.address(params.serviceAddress),
+      ],
+    })
+    return tx
+  }
+
+  /**
    * Create a DataVault
    */
   buildCreateDataVaultTx(params: {
@@ -592,11 +613,11 @@ export class ContractService {
 
       const fullType = `${this.packageId}::${this.getModuleName(structType)}::${structType}`
       
-      console.log('Fetching objects:', {
-        ownerAddress,
-        structType,
-        fullType,
-      })
+      // console.log('Fetching objects:', {
+      //   ownerAddress,
+      //   structType,
+      //   fullType,
+      // })
 
       const ownedObjects = await client.getOwnedObjects({
         owner: ownerAddress,
