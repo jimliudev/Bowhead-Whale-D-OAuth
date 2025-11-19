@@ -11,7 +11,7 @@ import {
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 import { walrus } from '@mysten/walrus'
-import './App.css'
+import '../../App.css'
 
 export default function WalletSignTest() {
   const currentAccount = useCurrentAccount()

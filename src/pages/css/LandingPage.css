@@ -1,0 +1,316 @@
+/* Landing Page - Minimalist Design inspired by Apple */
+
+.landing {
+  min-height: 100vh;
+  background: #ffffff;
+  color: #1d1d1f;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+
+/* Hero Section */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f5f7 100%);
+}
+
+.hero-container {
+  max-width: 980px;
+  text-align: center;
+  animation: fadeInUp 1s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hero-emoji {
+  font-size: 6rem;
+  margin-bottom: 1rem;
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-15px);
+  }
+}
+
+.hero-heading {
+  font-size: 4rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem 0;
+  color: #1d1d1f;
+  line-height: 1.1;
+}
+
+.hero-tagline {
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: #6e6e73;
+  margin: 0 0 2rem 0;
+  letter-spacing: -0.01em;
+}
+
+.hero-description {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: #86868b;
+  line-height: 1.6;
+  margin: 0 0 3rem 0;
+  max-width: 700px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* CTA Buttons */
+.cta-button {
+  display: inline-block;
+  padding: 0.875rem 2.5rem;
+  font-size: 1.0625rem;
+  font-weight: 400;
+  text-decoration: none;
+  border-radius: 980px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: none;
+  cursor: pointer;
+  letter-spacing: -0.01em;
+}
+
+.cta-button.primary {
+  background: #0071e3;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.25);
+}
+
+.cta-button.primary:hover {
+  background: #0077ed;
+  box-shadow: 0 6px 20px rgba(0, 113, 227, 0.35);
+  transform: translateY(-2px);
+}
+
+.cta-button.secondary {
+  background: #ffffff;
+  color: #0071e3;
+  border: 1.5px solid #0071e3;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.cta-button.secondary:hover {
+  background: #f5f5f7;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+/* Features Section */
+.features {
+  padding: 5rem 2rem;
+  background: #ffffff;
+}
+
+.features-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 3rem;
+}
+
+.feature-item {
+  text-align: center;
+  padding: 2rem 1.5rem;
+  border-radius: 18px;
+  transition: all 0.3s ease;
+}
+
+.feature-item:hover {
+  background: #f5f5f7;
+  transform: translateY(-5px);
+}
+
+.feature-icon {
+  font-size: 3.5rem;
+  margin-bottom: 1.5rem;
+  display: inline-block;
+}
+
+.feature-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1d1d1f;
+  margin: 0 0 1rem 0;
+  letter-spacing: -0.01em;
+}
+
+.feature-text {
+  font-size: 1.0625rem;
+  color: #86868b;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Footer */
+.landing-footer {
+  padding: 3rem 2rem 2rem;
+  background: #f5f5f7;
+  border: none;
+  border-top: none;
+}
+
+.footer-container {
+  max-width: 980px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.footer-link {
+  color: #424245;
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: color 0.3s ease;
+}
+
+.footer-link:hover {
+  color: #0071e3;
+}
+
+.footer-copyright {
+  color: #86868b;
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 1068px) {
+  .hero-heading {
+    font-size: 3rem;
+  }
+  
+  .hero-tagline {
+    font-size: 1.25rem;
+  }
+  
+  .hero-description {
+    font-size: 1.125rem;
+  }
+}
+
+@media (max-width: 734px) {
+  .hero {
+    min-height: auto;
+    padding: 4rem 1.5rem;
+  }
+  
+  .hero-emoji {
+    font-size: 4rem;
+  }
+  
+  .hero-heading {
+    font-size: 2.5rem;
+  }
+  
+  .hero-tagline {
+    font-size: 1.125rem;
+  }
+  
+  .hero-description {
+    font-size: 1rem;
+  }
+  
+  .hero-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  .cta-button {
+    width: 100%;
+    max-width: 320px;
+  }
+  
+  .features {
+    padding: 3rem 1.5rem;
+  }
+  
+  .features-container {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  
+  .feature-item {
+    padding: 1.5rem 1rem;
+  }
+  
+  .footer-links {
+    flex-direction: column;
+    gap: 1rem;
+  }
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Remove default margins and borders */
+.landing * {
+  box-sizing: border-box;
+}
+
+/* Override root padding for landing page - applied globally when landing page is active */
+body.landing-page-active,
+body.landing-page-active #root {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+body.landing-page-active {
+  display: block !important;
+  place-items: unset !important;
+}
+
+/* Selection color */
+::selection {
+  background: #0071e3;
+  color: #ffffff;
+}
+
+::-moz-selection {
+  background: #0071e3;
+  color: #ffffff;
+}
+

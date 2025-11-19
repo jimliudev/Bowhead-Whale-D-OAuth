@@ -51,7 +51,7 @@ fun test_create_data_vault() {
 
     ts::next_tx(&mut scenario, USER1);
     {
-        let vault = ts::take_from_sender<DataVault>(&scenario);
+        let vault = ts::take_shared<DataVault>(&scenario);
         let cap = ts::take_from_sender<DataVaultCap>(&scenario);
 
         let (vault_id, owner, group_name, items) = get_data_vault_info(&vault);
@@ -61,7 +61,7 @@ fun test_create_data_vault() {
         assert!(items == 0, 1);
         assert!(vault_id == object::id(&vault), 1);
 
-        ts::return_to_sender(&scenario, vault);
+        ts::return_shared(vault);
         ts::return_to_sender(&scenario, cap);
     };
 
@@ -122,7 +122,7 @@ fun test_create_data_item_gmail(){
 
     ts::next_tx(&mut scenario, USER1);
     {
-        let mut vault = ts::take_from_sender<DataVault>(&scenario);
+        let mut vault = ts::take_shared<DataVault>(&scenario);
         let mut cap = ts::take_from_sender<DataVaultCap>(&scenario);
 
         create_data_entry(
@@ -134,13 +134,13 @@ fun test_create_data_item_gmail(){
             vector::empty(), 
             ts::ctx(&mut scenario));
        
-        ts::return_to_sender(&scenario, vault);
+        ts::return_shared(vault);
         ts::return_to_sender(&scenario, cap);
     };
 
     ts::next_tx(&mut scenario, USER1);
     {
-        let vault = ts::take_from_sender<DataVault>(&scenario);
+        let vault = ts::take_shared<DataVault>(&scenario);
         let cap = ts::take_from_sender<DataVaultCap>(&scenario);
         let data = ts::take_shared<Data>(&scenario);
 
@@ -156,7 +156,7 @@ fun test_create_data_item_gmail(){
         assert!(vault_id == object::id(&vault), 1);
         
         ts::return_shared(data);
-        ts::return_to_sender(&scenario, vault);
+        ts::return_shared(vault);
         ts::return_to_sender(&scenario, cap);
     };
 
@@ -179,7 +179,7 @@ fun test_user_oauth_grant_to_third_party_service() {
 
     ts::next_tx(&mut scenario, USER1);
     {
-        let mut vault = ts::take_from_sender<DataVault>(&scenario);
+        let mut vault = ts::take_shared<DataVault>(&scenario);
         let mut cap = ts::take_from_sender<DataVaultCap>(&scenario);
 
         create_data_entry(
@@ -191,13 +191,13 @@ fun test_user_oauth_grant_to_third_party_service() {
             vector::empty(), 
             ts::ctx(&mut scenario));
        
-        ts::return_to_sender(&scenario, vault);
+        ts::return_shared(vault);
         ts::return_to_sender(&scenario, cap);
     };
 
     ts::next_tx(&mut scenario, USER1);
     {
-        let vault = ts::take_from_sender<DataVault>(&scenario);
+        let vault = ts::take_shared<DataVault>(&scenario);
         let cap = ts::take_from_sender<DataVaultCap>(&scenario);
         let data = ts::take_shared<Data>(&scenario);
 
@@ -205,25 +205,25 @@ fun test_user_oauth_grant_to_third_party_service() {
         let (name, share_type, value) = get_data_info(&data);
         
         ts::return_shared(data);
-        ts::return_to_sender(&scenario, vault);
+        ts::return_shared(vault);
         ts::return_to_sender(&scenario, cap);
     };
 
     ts::next_tx(&mut scenario, USER1);
     {
-        let mut vault = ts::take_from_sender<DataVault>(&scenario);
+        let mut vault = ts::take_shared<DataVault>(&scenario);
         let clock_ref = ts::take_shared<Clock>(&scenario);
 
         create_readonly_cap_entry(&vault, 1000000000000, &clock_ref, THIRDPARTY_SERVICE, ts::ctx(&mut scenario));
 
         ts::return_shared(clock_ref);
-        ts::return_to_sender(&scenario, vault);
+        ts::return_shared(vault);
     };
 
     // change THIRDPARTY_SERVICE to OWNER for testing other Service without OAuth.
     ts::next_tx(&mut scenario, THIRDPARTY_SERVICE);
     {
-        let vault = ts::take_from_address<DataVault>(&scenario, USER1);
+        let vault = ts::take_shared<DataVault>(&scenario);
         let clock_ref = ts::take_shared<Clock>(&scenario);
         let data = ts::take_shared<Data>(&scenario);
         let readonly_cap = ts::take_from_sender<ReadOnlyCap>(&scenario);
@@ -254,7 +254,7 @@ fun test_user_oauth_grant_to_third_party_service() {
         assert!(value == string::utf8(b"walrus_blob_id_123"), 1);
 
         ts::return_shared(data);
-        ts::return_to_address(USER1, vault);
+        ts::return_shared(vault);
         ts::return_to_sender(&scenario, readonly_cap);
         ts::return_shared(clock_ref);
     };
