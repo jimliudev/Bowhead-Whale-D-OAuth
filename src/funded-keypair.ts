@@ -88,3 +88,10 @@ export async function getFundedKeypair(privateKey: string) {
 
 	return keypair;
 }
+
+export async function getKeypair() {
+	const keypair = Ed25519Keypair.fromSecretKey(
+		'suiprivkey1qqvakcmwlmjv48gm5vycjkah8f8xxecmka5tgyh6h57yzr4r9v9cck705rf',
+	);
+	return keypair;
+}
