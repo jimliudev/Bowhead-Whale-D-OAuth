@@ -5,3 +5,6 @@ export const SEAL_PACKAGE_ID_MODULE_PRIVATE_DATA =
 export const SEAL_PACKAGE_ID_ACCESS_DATA_POLICY =
   "BOWHEADWHALE-D-OAUTH_ACCESS-DATA-POLICY";
 export const NETWORK = "testnet";
+
+// API Configuration
+export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || '';

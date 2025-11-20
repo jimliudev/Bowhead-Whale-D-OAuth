@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+dist
+.env
+.env.local
+.env.*.local
+.DS_Store
+*.log
+.git
+.gitignore
+.vscode
+.idea
+coverage
+.nyc_output
+move/bowhead/build
+move/bowhead/Move.lock
+

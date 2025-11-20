@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  bowhead-whale:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bowhead-whale-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - SUI_NETWORK=testnet
+      - SUI_RPC_URL=https://fullnode.testnet.sui.io:443
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+

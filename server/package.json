@@ -1,0 +1,23 @@
+{
+  "name": "bowhead-whale-api",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Express API server for Bowhead Whale D OAuth",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@mysten/sui": "^1.44.0",
+    "@mysten/walrus": "^0.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17"
+  }
+}
+

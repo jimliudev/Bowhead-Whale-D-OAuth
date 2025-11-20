@@ -10,7 +10,7 @@ import { walrus } from '@mysten/walrus'
 import { SessionKey } from '@mysten/seal'
 import { SealService } from '../services/sealService'
 import { contractService } from '../services/contractService'
-import { getKeypair } from '../funded-keypair'
+import { walrusApiService } from '../services/walrusApiService'
 import { SEAL_PACKAGE_ID } from '../config'
 import Header from '../components/Header'
 import './css/PageLayout.css'
@@ -354,15 +354,12 @@ export default function UserPage() {
       const encryptionSealId = sealService.getEncryptionSealId()
       const { encryptedObject } = await sealService.encrypt(encryptionSealId, contentBytes)
 
-      // Upload to Walrus
+      // Upload to Walrus via API
       setStatus('Uploading to Walrus...')
-      const keypair = await getKeypair()
-      
-      const { blobId } = await (suiClient as any).walrus.writeBlob({
-        blob: encryptedObject,
+      const { blobId } = await walrusApiService.uploadToWalrus({
+        encryptedData: encryptedObject,
         deletable: true,
         epochs: 3,
-        signer: keypair,
       })
 
       // Generate nonce
@@ -429,12 +426,11 @@ export default function UserPage() {
 
       console.log('Item info:', itemInfo)
 
-      // Step 2: Get encrypted blob from Walrus (参考 WalrusTest.tsx)
+      // Step 2: Get encrypted blob from Walrus via API
       setStatus('Downloading encrypted data from Walrus...')
       console.log('Reading blob from Walrus, Blob ID:', itemInfo.value)
       
-      // 直接传 blobId 字符串
-      const encryptedBlob = await (suiClient as any).walrus.readBlob({ blobId: itemInfo.value })
+      const { data: encryptedBlob } = await walrusApiService.readFromWalrus(itemInfo.value)
       console.log('Downloaded encrypted blob, size:', encryptedBlob.length)
 
       // Step 3: Get seal ID from vault and nonce
