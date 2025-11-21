@@ -4,11 +4,13 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
-import { walrus } from '@mysten/walrus';
+import { walrus, RetryableWalrusClientError } from '@mysten/walrus';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SessionKey, SealClient } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex } from '@mysten/sui/utils';
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
+
 
 dotenv.config();
 
@@ -43,26 +45,17 @@ const getEncryptionSealId = () => {
   return stringToHexString(SEAL_PACKAGE_ID_ACCESS_DATA_POLICY);
 };
 
-// Initialize Sui Client with Walrus extension
-// Set timeout to 2 minutes (120000ms) for external service calls
-const suiClient = new SuiClient({
-  url: getFullnodeUrl(process.env.SUI_NETWORK || 'testnet'),
-  network: process.env.SUI_NETWORK || 'testnet',
-  fetchOptions: {
-    // Set timeout for HTTP requests (2 minutes)
-    signal: null, // Will be handled per request
-  },
+const suiClient = new SuiJsonRpcClient({
+  url: getFullnodeUrl('testnet'),
+  network: 'testnet',
 }).$extend(
   walrus({
-    wasmUrl: 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm',
-    // Set timeout for Walrus storage node operations (2 minutes)
-    storageNodeClientOptions: {
-      timeout: 120000, // 2 minutes in milliseconds
-      onError: (error) => {
-        console.warn('Storage node error:', error);
+      uploadRelay: {
+          // 使用官方或自架的 Relay
+          host: 'https://upload-relay.testnet.walrus.space', 
+          sendTip: { max: 1_000 }, // 視情況設定小費
       },
-    },
-  })
+  }),
 );
 
 // Initialize keypair for Walrus uploads
@@ -82,8 +75,12 @@ app.get('/api/health', (req, res) => {
 
 // Upload encrypted data to Walrus
 app.post('/api/walrus/upload', async (req, res) => {
+  // Set extended timeout for upload endpoint (5 minutes)
+  req.setTimeout(300000);
+  res.setTimeout(300000);
+
   try {
-    const { encryptedData, deletable = true, epochs = 3, isAuth = false } = req.body;
+    const { encryptedData, deletable = true, epochs = 1, isAuth = false } = req.body;
     
     if (!encryptedData) {
       return res.status(400).json({
@@ -120,57 +117,13 @@ app.post('/api/walrus/upload', async (req, res) => {
     // Get keypair
     const keypair = getKeypair();
 
-    let blobId = null;
-    let blobObject = null;
-
-    try {
-      // Upload to Walrus
-      const result = await suiClient.walrus.writeBlob({
-        blob: blobData,
-        deletable: deletable,
-        epochs: epochs,
-        signer: keypair,
-      });
-
-      blobId = result.blobId;
-      blobObject = result.blobObject;
-
-      console.log(`✅ Upload successful! Blob ID: ${blobId}`);
-    } catch (error) {
-      // Check if error is NotEnoughBlobConfirmationsError
-      const errorMessage = error?.message || '';
-      const isConfirmationError = 
-        error?.name === 'NotEnoughBlobConfirmationsError' || 
-        errorMessage.includes('NotEnoughBlobConfirmationsError') ||
-        errorMessage.includes('Too many failures while writing blob');
-
-      if (isConfirmationError) {
-        // Try to extract blobId from error message
-        // Error format: "Too many failures while writing blob ZTcPOh-EQQMyUrNDcLZYskDKl36jC5ZnAZ4sMFNC388 to nodes"
-        const blobIdMatch = errorMessage.match(/blob ([A-Za-z0-9_-]+)/);
-        if (blobIdMatch && blobIdMatch[1]) {
-          blobId = blobIdMatch[1];
-          console.log(`⚠️ Partial upload (some nodes failed), but got Blob ID: ${blobId}`);
-          console.log(`✅ Ignoring confirmation error and returning success with Blob ID`);
-        } else {
-          // Try to get blobId from error object properties
-          blobId = error?.blobId || error?.data?.blobId || null;
-          if (blobId) {
-            console.log(`⚠️ Partial upload (some nodes failed), but got Blob ID: ${blobId}`);
-            console.log(`✅ Ignoring confirmation error and returning success with Blob ID`);
-          } else {
-            // Can't extract blobId, log warning but don't fail
-            console.warn(`⚠️ NotEnoughBlobConfirmationsError but couldn't extract blobId from:`, errorMessage);
-            // Still try to continue - the blob might have been registered
-            throw error;
-          }
-        }
-      } else {
-        // Other errors, rethrow
-        throw error;
-      }
-    }
-
+    const { blobId, blobObject } = await suiClient.walrus.writeBlob({
+      blob: blobData,
+      deletable: deletable,
+      epochs: epochs,
+      signer: keypair,
+    })
+    
     // If we have blobId, return success (even if there were confirmation errors)
     if (blobId) {
       res.json({
@@ -236,11 +189,11 @@ app.get('/api/walrus/read/:blobId', async (req, res) => {
 });
 
 // Decrypt data using Seal
-// Set timeout to 2 minutes for this endpoint
+// Set timeout to 5 minutes for this endpoint
 app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
-  // Set response timeout to 2 minutes (120000ms)
-  req.setTimeout(120000);
-  res.setTimeout(120000);
+  // Set response timeout to 5 minutes (300000ms)
+  req.setTimeout(300000);
+  res.setTimeout(300000);
   
   try {
     const { accessToken, vaultId, itemId } = req.body;
@@ -280,7 +233,7 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
         },
       }),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout: Failed to fetch Data object from chain (2 minutes)')), 120000)
+        setTimeout(() => reject(new Error('Timeout: Failed to fetch Data object from chain (5 minutes)')), 300000)
       ),
     ]);
 
@@ -305,16 +258,89 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
 
     console.log('✅ Data object retrieved:', { blobId, nonceLength: nonce.length });
 
-    // Step 2: Read encrypted blob from Walrus
+    // Step 2: Read encrypted blob from Walrus with retry logic
     console.log('📥 Reading encrypted blob from Walrus...');
-    // Set timeout for Walrus read operation (2 minutes)
-    const encryptedBlob = await Promise.race([
-      suiClient.walrus.readBlob({ blobId }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout: Failed to read blob from Walrus (2 minutes)')), 120000)
-      ),
-    ]);
-    console.log('✅ Encrypted blob retrieved, size:', encryptedBlob.length);
+    // Set timeout for Walrus read operation (5 minutes)
+    // Walrus is fault-tolerant: individual node errors are logged but don't fail the operation
+    // The operation only fails if not enough nodes respond successfully
+    let encryptedBlob;
+    const maxRetries = 2; // Retry up to 2 times
+    let retryCount = 0;
+    
+    while (retryCount <= maxRetries) {
+      try {
+        encryptedBlob = await Promise.race([
+          suiClient.walrus.readBlob({ blobId }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout: Failed to read blob from Walrus (5 minutes)')), 300000)
+          ),
+        ]);
+        console.log('✅ Encrypted blob retrieved, size:', encryptedBlob.length);
+        break; // Success, exit retry loop
+      } catch (walrusError) {
+        console.error(`❌ Walrus read error (attempt ${retryCount + 1}/${maxRetries + 1}):`, {
+          message: walrusError.message,
+          name: walrusError.name,
+          status: walrusError.status,
+          blobId,
+        });
+        
+        // Check if this is a retryable error
+        if (walrusError instanceof RetryableWalrusClientError && retryCount < maxRetries) {
+          console.log(`🔄 Retrying after resetting Walrus client...`);
+          suiClient.walrus.reset();
+          retryCount++;
+          // Wait a bit before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+          continue;
+        }
+        
+        // Check for network errors (fetch failed)
+        if (walrusError.message?.includes('fetch failed') || 
+            walrusError.name === 'TypeError' ||
+            walrusError.message?.includes('ECONNREFUSED') ||
+            walrusError.message?.includes('ENOTFOUND')) {
+          return res.status(503).json({
+            success: false,
+            error: 'Network connectivity issue: Unable to connect to Walrus storage nodes. This may indicate: 1) Container network restrictions, 2) DNS resolution issues, 3) Firewall blocking outbound connections, 4) Storage nodes temporarily unavailable.',
+            details: {
+              blobId,
+              errorType: 'NetworkError',
+              suggestion: 'Please check: 1) Container network configuration, 2) Outbound connectivity from Azure Web App, 3) DNS resolution, 4) Firewall rules.',
+            },
+          });
+        }
+        
+        // Check for specific error types
+        if (walrusError.message?.includes('sliver') || 
+            walrusError.message?.includes('unavailable') ||
+            walrusError.message?.includes('NotEnoughSlivers')) {
+          return res.status(404).json({
+            success: false,
+            error: 'Blob data unavailable: Unable to retrieve enough data fragments (slivers) from storage nodes. This may happen if: 1) The data was recently uploaded and not yet fully distributed, 2) Many storage nodes are temporarily unavailable, 3) Network connectivity issues preventing access to storage nodes, 4) The data may have expired or been deleted.',
+            details: {
+              blobId,
+              errorType: 'NotEnoughSlivers',
+              suggestion: 'Please try again later. If the problem persists, check network connectivity from the container to Walrus storage nodes.',
+            },
+          });
+        }
+        
+        if (walrusError.message?.includes('Timeout')) {
+          return res.status(504).json({
+            success: false,
+            error: 'Request timeout: Failed to read blob from Walrus within 5 minutes. This may be due to network issues or insufficient storage node responses.',
+          });
+        }
+        
+        // If we've exhausted retries or it's not retryable, throw the error
+        if (retryCount >= maxRetries) {
+          throw walrusError;
+        }
+        
+        retryCount++;
+      }
+    }
 
     // Step 3: Import SessionKey from base64
     console.log('🔑 Importing SessionKey from base64...');
@@ -395,7 +421,7 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
 
     // Step 8: Decrypt using Seal
     console.log('🔓 Decrypting data...');
-    // Set timeout for Seal decryption (2 minutes)
+    // Set timeout for Seal decryption (5 minutes)
     // Seal decryption may need to contact multiple key servers to retrieve slivers
     const decryptedBytes = await Promise.race([
       sealClient.decrypt({
@@ -404,7 +430,7 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
         txBytes,
       }),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout: Failed to decrypt data. Unable to retrieve enough slivers from key servers (2 minutes)')), 120000)
+        setTimeout(() => reject(new Error('Timeout: Failed to decrypt data. Unable to retrieve enough slivers from key servers (5 minutes)')), 300000)
       ),
     ]);
     console.log('✅ Decryption successful, decrypted data length:', decryptedBytes.length);
@@ -426,11 +452,32 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
   } catch (error) {
     console.error('❌ Seal decryption error:', error);
     
-    // Handle timeout errors specifically
-    if (error.message?.includes('Timeout') || error.message?.includes('slivers')) {
+    // Handle specific error types
+    if (error.message?.includes('Timeout')) {
       return res.status(504).json({
         success: false,
-        error: error.message || 'Request timeout: Failed to decrypt data. Unable to retrieve enough slivers from key servers. This may be due to network issues, key server unavailability, or insufficient storage node responses.',
+        error: 'Request timeout: Failed to decrypt data within 2 minutes. Unable to retrieve enough slivers from key servers.',
+        details: {
+          suggestion: 'This may be due to network issues, key server unavailability, or insufficient storage node responses. Please try again later.',
+        },
+      });
+    }
+    
+    if (error.message?.includes('slivers') || error.message?.includes('Unable to retrieve enough')) {
+      return res.status(503).json({
+        success: false,
+        error: 'Service unavailable: Unable to retrieve enough data fragments (slivers) to decrypt. This may happen if: 1) Key servers are temporarily unavailable, 2) Network connectivity issues, 3) Data fragments not fully distributed yet.',
+        details: {
+          suggestion: 'Please try again later. The system needs to contact multiple key servers and storage nodes to retrieve all required data fragments.',
+        },
+      });
+    }
+    
+    // Handle Walrus-related errors that might have been caught here
+    if (error.message?.includes('sliver') || error.message?.includes('unavailable')) {
+      return res.status(404).json({
+        success: false,
+        error: 'Data unavailable: Required data fragments are not available. This may indicate the data was recently uploaded and not yet fully distributed, or some storage nodes are temporarily unavailable.',
       });
     }
     
