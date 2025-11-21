@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
-import { walrus, RetryableWalrusClientError } from '@mysten/walrus';
+import { walrus } from '@mysten/walrus';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SessionKey, SealClient } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
@@ -118,12 +118,12 @@ app.post('/api/walrus/upload', async (req, res) => {
     const keypair = getKeypair();
 
     const { blobId, blobObject } = await suiClient.walrus.writeBlob({
-      blob: blobData,
-      deletable: deletable,
-      epochs: epochs,
-      signer: keypair,
+        blob: blobData,
+        deletable: deletable,
+        epochs: epochs,
+        signer: keypair,
     })
-    
+
     // If we have blobId, return success (even if there were confirmation errors)
     if (blobId) {
       res.json({
@@ -150,7 +150,7 @@ app.post('/api/walrus/upload', async (req, res) => {
   }
 });
 
-// Read blob from Walrus
+// Read blob from Walrus using Aggregator API (faster than SDK reconstruction)
 app.get('/api/walrus/read/:blobId', async (req, res) => {
   try {
     const { blobId } = req.params;
@@ -162,13 +162,31 @@ app.get('/api/walrus/read/:blobId', async (req, res) => {
       });
     }
 
-    console.log(`📥 Reading blob from Walrus: ${blobId}`);
+    console.log(`📥 Reading blob from Walrus Aggregator: ${blobId}`);
 
-    // Read blob from Walrus
-    const blobData = await suiClient.walrus.readBlob({ blobId });
+    // Use Walrus Aggregator API for faster direct access
+    const aggregatorUrl = `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${blobId}`;
+    
+    
+    const response = await Promise.race([
+      fetch(aggregatorUrl),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout: Failed to read blob from Walrus Aggregator (60s)')), 60000)
+      ),
+    ]);
+
+    if (!response.ok) {
+      throw new Error(`Aggregator returned ${response.status}: ${response.statusText}`);
+    }
+
+    // Get blob data as buffer
+    const arrayBuffer = await response.arrayBuffer();
+    const blobData = Buffer.from(arrayBuffer);
 
     // Convert to base64 for response
-    const base64Data = Buffer.from(blobData).toString('base64');
+    const base64Data = blobData.toString('base64');
+
+    console.log(`✅ Blob read successfully from Aggregator, size: ${blobData.length} bytes`);
 
     res.json({
       success: true,
@@ -180,7 +198,15 @@ app.get('/api/walrus/read/:blobId', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('❌ Walrus read error:', error);
+    console.error('❌ Walrus Aggregator read error:', error);
+    
+    if (error.message?.includes('Timeout')) {
+      return res.status(504).json({
+        success: false,
+        error: 'Request timeout: Failed to read blob from Walrus Aggregator',
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to read from Walrus',
@@ -258,88 +284,71 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
 
     console.log('✅ Data object retrieved:', { blobId, nonceLength: nonce.length });
 
-    // Step 2: Read encrypted blob from Walrus with retry logic
-    console.log('📥 Reading encrypted blob from Walrus...');
-    // Set timeout for Walrus read operation (5 minutes)
-    // Walrus is fault-tolerant: individual node errors are logged but don't fail the operation
-    // The operation only fails if not enough nodes respond successfully
+    // Step 2: Read encrypted blob from Walrus using Aggregator API (faster than SDK)
+    console.log('📥 Reading encrypted blob from Walrus Aggregator...');
     let encryptedBlob;
-    const maxRetries = 2; // Retry up to 2 times
-    let retryCount = 0;
     
-    while (retryCount <= maxRetries) {
-      try {
-        encryptedBlob = await Promise.race([
-          suiClient.walrus.readBlob({ blobId }),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout: Failed to read blob from Walrus (5 minutes)')), 300000)
-          ),
-        ]);
-        console.log('✅ Encrypted blob retrieved, size:', encryptedBlob.length);
-        break; // Success, exit retry loop
-      } catch (walrusError) {
-        console.error(`❌ Walrus read error (attempt ${retryCount + 1}/${maxRetries + 1}):`, {
-          message: walrusError.message,
-          name: walrusError.name,
-          status: walrusError.status,
-          blobId,
-        });
-        
-        // Check if this is a retryable error
-        if (walrusError instanceof RetryableWalrusClientError && retryCount < maxRetries) {
-          console.log(`🔄 Retrying after resetting Walrus client...`);
-          suiClient.walrus.reset();
-          retryCount++;
-          // Wait a bit before retrying (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
-          continue;
-        }
-        
-        // Check for network errors (fetch failed)
-        if (walrusError.message?.includes('fetch failed') || 
-            walrusError.name === 'TypeError' ||
-            walrusError.message?.includes('ECONNREFUSED') ||
-            walrusError.message?.includes('ENOTFOUND')) {
-          return res.status(503).json({
-            success: false,
-            error: 'Network connectivity issue: Unable to connect to Walrus storage nodes. This may indicate: 1) Container network restrictions, 2) DNS resolution issues, 3) Firewall blocking outbound connections, 4) Storage nodes temporarily unavailable.',
-            details: {
-              blobId,
-              errorType: 'NetworkError',
-              suggestion: 'Please check: 1) Container network configuration, 2) Outbound connectivity from Azure Web App, 3) DNS resolution, 4) Firewall rules.',
-            },
-          });
-        }
-        
-        // Check for specific error types
-        if (walrusError.message?.includes('sliver') || 
-            walrusError.message?.includes('unavailable') ||
-            walrusError.message?.includes('NotEnoughSlivers')) {
+    try {
+      const aggregatorUrl = `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${blobId}`;
+      console.log(`🌐 Fetching from: ${aggregatorUrl}`);
+      
+      const response = await Promise.race([
+        fetch(aggregatorUrl),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout: Failed to read blob from Walrus Aggregator (60s)')), 60000)
+        ),
+      ]);
+
+      if (!response.ok) {
+        if (response.status === 404) {
           return res.status(404).json({
             success: false,
-            error: 'Blob data unavailable: Unable to retrieve enough data fragments (slivers) from storage nodes. This may happen if: 1) The data was recently uploaded and not yet fully distributed, 2) Many storage nodes are temporarily unavailable, 3) Network connectivity issues preventing access to storage nodes, 4) The data may have expired or been deleted.',
+            error: 'Blob not found: The requested blob may not exist or has not been fully distributed yet.',
             details: {
               blobId,
-              errorType: 'NotEnoughSlivers',
-              suggestion: 'Please try again later. If the problem persists, check network connectivity from the container to Walrus storage nodes.',
+              errorType: 'NotFound',
+              suggestion: 'If the data was recently uploaded, please wait a few moments and try again.',
             },
           });
         }
-        
-        if (walrusError.message?.includes('Timeout')) {
-          return res.status(504).json({
-            success: false,
-            error: 'Request timeout: Failed to read blob from Walrus within 5 minutes. This may be due to network issues or insufficient storage node responses.',
-          });
-        }
-        
-        // If we've exhausted retries or it's not retryable, throw the error
-        if (retryCount >= maxRetries) {
-          throw walrusError;
-        }
-        
-        retryCount++;
+        throw new Error(`Aggregator returned ${response.status}: ${response.statusText}`);
       }
+
+      const arrayBuffer = await response.arrayBuffer();
+      encryptedBlob = new Uint8Array(arrayBuffer);
+      
+      console.log('✅ Encrypted blob retrieved from Aggregator, size:', encryptedBlob.length);
+    } catch (walrusError) {
+      console.error('❌ Walrus Aggregator read error:', {
+        message: walrusError.message,
+        name: walrusError.name,
+        blobId,
+      });
+      
+      // Check for network errors (fetch failed)
+      if (walrusError.message?.includes('fetch failed') || 
+          walrusError.name === 'TypeError' ||
+          walrusError.message?.includes('ECONNREFUSED') ||
+          walrusError.message?.includes('ENOTFOUND')) {
+        return res.status(503).json({
+          success: false,
+          error: 'Network connectivity issue: Unable to connect to Walrus Aggregator. This may indicate: 1) Container network restrictions, 2) DNS resolution issues, 3) Firewall blocking outbound connections.',
+          details: {
+            blobId,
+            errorType: 'NetworkError',
+            suggestion: 'Please check: 1) Container network configuration, 2) Outbound connectivity from Azure Web App, 3) DNS resolution.',
+          },
+        });
+      }
+      
+      if (walrusError.message?.includes('Timeout')) {
+        return res.status(504).json({
+          success: false,
+          error: 'Request timeout: Failed to read blob from Walrus Aggregator within 60 seconds.',
+        });
+      }
+      
+      throw walrusError;
     }
 
     // Step 3: Import SessionKey from base64
