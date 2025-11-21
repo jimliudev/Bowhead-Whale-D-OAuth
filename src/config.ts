@@ -1,5 +1,5 @@
 export const SEAL_PACKAGE_ID =
-  "0x41b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c74";
+  "0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3";
 export const SEAL_PACKAGE_ID_MODULE_PRIVATE_DATA =
   "seal_private_data";
 export const SEAL_PACKAGE_ID_ACCESS_DATA_POLICY =

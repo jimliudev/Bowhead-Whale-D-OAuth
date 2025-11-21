@@ -147,6 +147,14 @@ export default function SealTest() {
         await newSessionKey.setPersonalMessageSignature(signature)
         currentSessionKey = newSessionKey
         setSessionKey(newSessionKey)
+
+        // 顯示 export key 到輸入欄位
+        try {
+          const serialized = serializeSessionKey(newSessionKey)
+          setManualSessionKeyJson(serialized)
+        } catch (err) {
+          console.warn('⚠️ 無法導出 SessionKey:', err)
+        }
       }
 
       setStatus('正在解密數據...')
@@ -208,26 +216,41 @@ export default function SealTest() {
     return true
   }
 
-  // 序列化 SessionKey 为 JSON
-  const serializeSessionKey = async (key: SessionKey): Promise<string> => {
+  // 序列化 SessionKey 为 JSON (使用 export() 方法)
+  // 注意：export() 返回的對象有自定義 toJSON 會拋錯，需要手動構建可序列化的對象
+  const serializeSessionKey = (key: SessionKey): string => {
     try {
-      // SessionKey 可能没有直接的序列化方法，我们需要获取其内部数据
-      // 这里我们尝试获取 key 的相关信息
-      const keyData = {
-        address: currentAccount?.address || '',
-        packageId: SEAL_PACKAGE_ID,
-        // 注意：SessionKey 可能包含敏感信息，实际序列化可能需要根据 SDK 的实现
-        // 这里我们存储基本信息，实际使用时可能需要重新创建
-        timestamp: Date.now(),
+      const exported = key.export()
+      // 手動構建可序列化的對象，避免觸發 export() 返回對象的 toJSON 錯誤
+      const serializable: {
+        address: string
+        packageId: string
+        mvrName?: string
+        creationTimeMs: number
+        ttlMin: number
+        personalMessageSignature?: string
+        sessionKey: string
+      } = {
+        address: exported.address,
+        packageId: exported.packageId,
+        creationTimeMs: exported.creationTimeMs,
+        ttlMin: exported.ttlMin,
+        sessionKey: exported.sessionKey,
       }
-      return JSON.stringify(keyData, null, 2)
+      if (exported.mvrName) {
+        serializable.mvrName = exported.mvrName
+      }
+      if (exported.personalMessageSignature) {
+        serializable.personalMessageSignature = exported.personalMessageSignature
+      }
+      return JSON.stringify(serializable, null, 2)
     } catch (err) {
       console.error('序列化 SessionKey 失敗:', err)
       throw new Error('無法序列化 SessionKey')
     }
   }
 
-  // 从导入的 JSON 创建 SessionKey
+  // 从导入的 JSON 创建 SessionKey (使用 SessionKey.import)
   const createSessionKeyFromImported = async (jsonString: string): Promise<SessionKey | null> => {
     try {
       if (!jsonString.trim()) return null
@@ -236,39 +259,23 @@ export default function SealTest() {
       const keyData = JSON.parse(jsonString)
       console.log('📋 導入的 SessionKey 數據:', keyData)
       
-      // 提取基本信息
-      const address = keyData.address || currentAccount?.address
-      const packageId = keyData.packageId || SEAL_PACKAGE_ID
+      // 使用 SessionKey.import 恢復 SessionKey
+      const restoredSessionKey = SessionKey.import(keyData, suiClient)
       
-      if (!address) {
-        console.warn('⚠️ 導入的 JSON 中沒有 address，使用當前帳戶地址')
-        if (!currentAccount) return null
+      console.log('✅ 從導入的 JSON 恢復了 SessionKey 對象')
+      
+      // 檢查是否需要重新簽名
+      if (!restoredSessionKey.getPersonalMessage() || !keyData.personalMessageSignature) {
+        setManualStatus('請在錢包中簽名以使用導入的 Session Key...')
+        const personalMessage = restoredSessionKey.getPersonalMessage()
+        const signature = await signPersonalMessage(personalMessage)
+        await restoredSessionKey.setPersonalMessageSignature(signature)
+        console.log('✅ 導入的 SessionKey 已簽名並準備就緒')
+      } else {
+        console.log('✅ 導入的 SessionKey 已包含簽名，可直接使用')
       }
       
-      console.log('🔑 使用以下參數重新創建 SessionKey:', {
-        address: address || currentAccount?.address,
-        packageId,
-        ttlMin: 10,
-      })
-      
-      // 重新創建 SessionKey（需要重新簽名）
-      const newSessionKey = await SessionKey.create({
-        address: address || currentAccount!.address,
-        packageId,
-        ttlMin: 10,
-        suiClient,
-      })
-      
-      console.log('✅ 從導入的 JSON 創建了新的 SessionKey 對象')
-      
-      // 需要重新簽名
-      setManualStatus('請在錢包中簽名以使用導入的 Session Key...')
-      const personalMessage = newSessionKey.getPersonalMessage()
-      const signature = await signPersonalMessage(personalMessage)
-      await newSessionKey.setPersonalMessageSignature(signature)
-      
-      console.log('✅ 導入的 SessionKey 已簽名並準備就緒')
-      return newSessionKey
+      return restoredSessionKey
     } catch (err) {
       console.error('❌ 從導入的 JSON 創建 SessionKey 失敗:', err)
       return null
@@ -344,6 +351,14 @@ export default function SealTest() {
           currentSessionKey = importedKey
           setSessionKey(importedKey)
           console.log('✅ 成功使用導入的 SessionKey')
+          
+          // 顯示 export key 到輸入欄位
+          try {
+            const serialized = serializeSessionKey(importedKey)
+            setManualSessionKeyJson(serialized)
+          } catch (err) {
+            console.warn('⚠️ 無法導出 SessionKey:', err)
+          }
         } else {
           console.warn('⚠️ 無法從導入的 JSON 創建 SessionKey，將使用其他方式')
         }
@@ -387,15 +402,15 @@ export default function SealTest() {
           
           console.log('🎉 新的 Session Key 已創建並設置')
           
-          // 序列化並顯示創建好的 Session Key
-          try {
-            const serialized = await serializeSessionKey(newSessionKey)
-            console.log('💾 Session Key 序列化結果:', serialized)
-            setManualSessionKeyJson(serialized)
-            setManualStatus('✅ Session Key 已創建並顯示在下方')
-          } catch (err) {
-            console.warn('⚠️ 無法序列化 SessionKey:', err)
-          }
+              // 序列化並顯示創建好的 Session Key
+              try {
+                const serialized = serializeSessionKey(newSessionKey)
+                console.log('💾 Session Key 序列化結果:', serialized)
+                setManualSessionKeyJson(serialized)
+                setManualStatus('✅ Session Key 已創建並顯示在下方')
+              } catch (err) {
+                console.warn('⚠️ 無法序列化 SessionKey:', err)
+              }
         } else {
           // 輸入欄位有值，檢查是否有有效的 sessionKey
           // 注意：由於 SessionKey 無法完全反序列化，我們仍然需要有效的 sessionKey 對象
@@ -403,49 +418,67 @@ export default function SealTest() {
             // 使用現有的有效 sessionKey
             console.log('♻️ 使用現有的有效 Session Key')
             currentSessionKey = sessionKey
-          } else {
-            // 創建新的 Session Key
-            console.log('📝 輸入欄位有值但現有 Session Key 無效，準備創建新的')
-            setManualStatus('正在創建 Session Key...')
-
-            console.log('🔑 創建 Session Key 參數:', {
-              address: currentAccount.address,
-              packageId: SEAL_PACKAGE_ID,
-              ttlMin: 10,
-            })
-
-            const newSessionKey = await SessionKey.create({
-              address: currentAccount.address,
-              packageId: SEAL_PACKAGE_ID,
-              ttlMin: 10,
-              suiClient,
-            })
-
-            console.log('✅ Session Key 對象已創建:', {
-              hasPersonalMessage: !!newSessionKey.getPersonalMessage(),
-            })
-
-            setManualStatus('請在錢包中簽名以創建 Session Key...')
-
-            const personalMessage = newSessionKey.getPersonalMessage()
-            console.log('📝 Personal Message 長度:', personalMessage.length)
-            const signature = await signPersonalMessage(personalMessage)
-            console.log('✍️ 簽名完成，簽名長度:', signature.length)
-
-            await newSessionKey.setPersonalMessageSignature(signature)
-            currentSessionKey = newSessionKey
-            setSessionKey(newSessionKey)
             
-            console.log('🎉 新的 Session Key 已創建並設置')
-            
-            // 序列化並顯示創建好的 Session Key
+            // 顯示 export key 到輸入欄位
             try {
-              const serialized = await serializeSessionKey(newSessionKey)
-              console.log('💾 Session Key 序列化結果:', serialized)
+              const serialized = serializeSessionKey(sessionKey)
               setManualSessionKeyJson(serialized)
-              setManualStatus('✅ Session Key 已創建並顯示在下方')
             } catch (err) {
-              console.warn('⚠️ 無法序列化 SessionKey:', err)
+              console.warn('⚠️ 無法導出 SessionKey:', err)
+            }
+          } else {
+            // 嘗試從 manualSessionKeyJson 導入
+            console.log('📝 輸入欄位有值，嘗試從中恢復 Session Key')
+            const importedFromManual = await createSessionKeyFromImported(manualSessionKeyJson)
+            
+            if (importedFromManual) {
+              console.log('✅ 成功從手動輸入欄位恢復 Session Key')
+              currentSessionKey = importedFromManual
+              setSessionKey(importedFromManual)
+            } else {
+              // 如果導入失敗，則創建新的 Session Key
+              console.log('⚠️ 無法從手動輸入恢復，準備創建新的 Session Key')
+              setManualStatus('無法從輸入恢復 Key，正在創建新的 Session Key...')
+
+              console.log('🔑 創建 Session Key 參數:', {
+                address: currentAccount.address,
+                packageId: SEAL_PACKAGE_ID,
+                ttlMin: 10,
+              })
+
+              const newSessionKey = await SessionKey.create({
+                address: currentAccount.address,
+                packageId: SEAL_PACKAGE_ID,
+                ttlMin: 10,
+                suiClient,
+              })
+
+              console.log('✅ Session Key 對象已創建:', {
+                hasPersonalMessage: !!newSessionKey.getPersonalMessage(),
+              })
+
+              setManualStatus('請在錢包中簽名以創建 Session Key...')
+
+              const personalMessage = newSessionKey.getPersonalMessage()
+              console.log('📝 Personal Message 長度:', personalMessage.length)
+              const signature = await signPersonalMessage(personalMessage)
+              console.log('✍️ 簽名完成，簽名長度:', signature.length)
+
+              await newSessionKey.setPersonalMessageSignature(signature)
+              currentSessionKey = newSessionKey
+              setSessionKey(newSessionKey)
+              
+              console.log('🎉 新的 Session Key 已創建並設置')
+              
+              // 序列化並顯示創建好的 Session Key
+              try {
+                const serialized = serializeSessionKey(newSessionKey)
+                console.log('💾 Session Key 序列化結果:', serialized)
+                setManualSessionKeyJson(serialized)
+                setManualStatus('✅ Session Key 已創建並顯示在下方')
+              } catch (err) {
+                console.warn('⚠️ 無法序列化 SessionKey:', err)
+              }
             }
           }
         }
@@ -453,9 +486,10 @@ export default function SealTest() {
 
       // 解密前顯示使用的 Session Key 信息
       console.log('=== 解密前 Session Key 信息 ===')
+
       if (currentSessionKey) {
         try {
-          const serialized = await serializeSessionKey(currentSessionKey)
+          const serialized = serializeSessionKey(currentSessionKey)
           console.log('🔐 將使用以下 Session Key 進行解密:')
           console.log('Session Key JSON:', serialized)
           console.log('Session Key 對象:', {
@@ -464,6 +498,8 @@ export default function SealTest() {
             address: currentAccount.address,
             packageId: SEAL_PACKAGE_ID,
           })
+          // 更新顯示的 Session Key JSON
+          setManualSessionKeyJson(serialized)
         } catch (err) {
           console.log('🔐 將使用以下 Session Key 進行解密:')
           console.log('Session Key 對象 (無法序列化):', {
@@ -472,6 +508,7 @@ export default function SealTest() {
             address: currentAccount.address,
             packageId: SEAL_PACKAGE_ID,
           })
+          console.error('無法導出 SessionKey:', err)
         }
       } else {
         console.error('❌ 錯誤：沒有可用的 Session Key！')
@@ -877,29 +914,76 @@ export default function SealTest() {
             <label htmlFor="manualSessionKeyJson">
               <strong>Session Key（JSON 格式，可選）：</strong>
             </label>
-            {manualSessionKeyJson && (
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(manualSessionKeyJson)
-                    setManualStatus('✅ 已複製 Session Key 到剪貼板')
-                  } catch (err) {
-                    setManualError('複製失敗')
-                  }
-                }}
-                style={{
-                  padding: '0.2rem 0.6rem',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer',
-                  background: '#2196f3',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                }}
-              >
-                📋 複製
-              </button>
-            )}
+                  onClick={() => {
+                    setSessionKey(null)
+                    setManualSessionKeyJson('')
+                    setManualStatus('已清除 Session Key')
+                  }}
+                  style={{
+                    padding: '0.2rem 0.6rem',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    background: '#f44336',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                  }}
+                  title="清除當前 Session Key 和輸入框"
+                >
+                  🗑️ 清除
+                </button>
+              {sessionKey && (
+                <button
+                  onClick={async () => {
+                    try {
+                      const serialized = serializeSessionKey(sessionKey)
+                      setManualSessionKeyJson(serialized)
+                      setManualStatus('✅ 已顯示當前 Session Key 的 export() 輸出')
+                    } catch (err: any) {
+                      setManualError(`無法導出 SessionKey: ${err?.message || err}`)
+                      console.error('導出 SessionKey 失敗:', err)
+                    }
+                  }}
+                  style={{
+                    padding: '0.2rem 0.6rem',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    background: '#4caf50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                  }}
+                  title="顯示當前 Session Key 的 export() 輸出"
+                >
+                  📤 顯示 Export
+                </button>
+              )}
+              {manualSessionKeyJson && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(manualSessionKeyJson)
+                      setManualStatus('✅ 已複製 Session Key 到剪貼板')
+                    } catch (err) {
+                      setManualError('複製失敗')
+                    }
+                  }}
+                  style={{
+                    padding: '0.2rem 0.6rem',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    background: '#2196f3',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                  }}
+                >
+                  📋 複製
+                </button>
+              )}
+            </div>
           </div>
           <textarea
             id="manualSessionKeyJson"
@@ -916,7 +1000,7 @@ export default function SealTest() {
             placeholder='{"address": "...", "packageId": "...", "timestamp": ...}'
           />
           <p style={{ marginTop: '0.3rem', fontSize: '0.75rem', color: '#666' }}>
-            可選：輸入之前保存的 Session Key JSON。如果留空，系統會自動創建新的 Session Key，並顯示在此欄位中。
+            可選：輸入之前保存的 Session Key JSON。如果留空，系統會自動創建新的 Session Key。如果在此處貼上 JSON，系統會嘗試從中恢復 Session Key。
           </p>
           {sessionKey && !manualSessionKeyJson.trim() && (
             <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#fff3cd', borderRadius: '4px', fontSize: '0.75rem' }}>

@@ -177,6 +177,29 @@ export class ContractService {
   }
 
   /**
+   * Add an address to the DataVault allow list
+   */
+  buildCreateDataVaultAllowListTx(params: {
+    vaultCapId: string
+    vaultId: string
+    accessAddress: string
+    expiresAt: number
+  }): Transaction {
+    const tx = new Transaction()
+    tx.moveCall({
+      target: `${this.packageId}::seal_private_data::create_data_vault_allow_list`,
+      arguments: [
+        tx.object(params.vaultCapId),
+        tx.object(params.vaultId),
+        tx.pure.address(params.accessAddress),
+        tx.pure.u64(params.expiresAt),
+        tx.object('0x6'), // Clock
+      ],
+    })
+    return tx
+  }
+
+  /**
    * Build seal_approve transaction bytes for owner access
    */
   buildSealApproveTx(params: {

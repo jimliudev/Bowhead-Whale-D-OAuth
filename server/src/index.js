@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { walrus } from '@mysten/walrus';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import { cache } from './cache.js';
 
 dotenv.config();
 
@@ -45,10 +46,156 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Cache API
+// Get cache value
+app.get('/api/cache/:key', (req, res) => {
+  try {
+    const { key } = req.params;
+    
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing cache key',
+      });
+    }
+
+    const value = cache.get(key);
+    
+    if (value === null) {
+      return res.status(404).json({
+        success: false,
+        error: 'Cache key not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        key,
+        value,
+      },
+    });
+  } catch (error) {
+    console.error('Cache get error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get cache value',
+    });
+  }
+});
+
+// Set cache value
+app.post('/api/cache', (req, res) => {
+  try {
+    const { key, value, ttl } = req.body;
+    
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: key',
+      });
+    }
+
+    if (value === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: value',
+      });
+    }
+
+    // Set cache with optional TTL (in seconds)
+    const success = cache.set(key, value, ttl || null);
+
+    if (!success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to set cache value',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Cache value set successfully',
+      data: {
+        key,
+        ttl: ttl || null,
+      },
+    });
+  } catch (error) {
+    console.error('Cache set error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to set cache value',
+    });
+  }
+});
+
+// Delete cache value
+app.delete('/api/cache/:key', (req, res) => {
+  try {
+    const { key } = req.params;
+    
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing cache key',
+      });
+    }
+
+    const deleted = cache.delete(key);
+
+    res.json({
+      success: true,
+      message: deleted ? 'Cache entry deleted' : 'Cache entry not found',
+      deleted,
+    });
+  } catch (error) {
+    console.error('Cache delete error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to delete cache value',
+    });
+  }
+});
+
+// Get cache statistics
+app.get('/api/cache/stats', (req, res) => {
+  try {
+    const stats = cache.getStats();
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    console.error('Cache stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get cache statistics',
+    });
+  }
+});
+
+// Clear all cache
+app.delete('/api/cache', (req, res) => {
+  try {
+    cache.clear();
+    res.json({
+      success: true,
+      message: 'All cache entries cleared',
+    });
+  } catch (error) {
+    console.error('Cache clear error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to clear cache',
+    });
+  }
+});
+
 // Upload encrypted data to Walrus
 app.post('/api/walrus/upload', async (req, res) => {
   try {
-    const { encryptedData, deletable = true, epochs = 3 } = req.body;
+    const { encryptedData, deletable = true, epochs = 3, isAuth = false } = req.body;
     
     if (!encryptedData) {
       return res.status(400).json({
@@ -230,4 +377,3 @@ app.listen(PORT, () => {
     console.log(`🌐 Frontend served from /dist`);
   }
 });
-

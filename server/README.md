@@ -29,6 +29,17 @@ Express.js backend API server for Bowhead Whale D OAuth application.
 - `GET /api/walrus/read/:blobId` - Read blob from Walrus
   - Returns: `{ blobId, data (base64), size }`
 
+### Cache Management
+- `GET /api/cache/:key` - Get cache value by key
+  - Returns: `{ key, value }`
+- `POST /api/cache` - Set cache value
+  - Body: `{ key: string, value: any, ttl?: number }` (ttl in seconds)
+  - Returns: `{ key, ttl }`
+- `DELETE /api/cache/:key` - Delete cache entry by key
+- `GET /api/cache/stats` - Get cache statistics
+  - Returns: `{ size, expired, active }`
+- `DELETE /api/cache` - Clear all cache entries
+
 ## Development
 
 ```bash

@@ -100,7 +100,7 @@ export class SealService {
     sealId: string,
     vaultId: string,
     itemId: string,
-    readonlyCapId: string
+    accessAddress: string
   ): Promise<Uint8Array> {
     try {
       console.log('=== sealService.decrypt 開始 ===')
@@ -111,7 +111,7 @@ export class SealService {
         sealId,
         vaultId,
         itemId,
-        readonlyCapId,
+        accessAddress,
       })
 
       const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
@@ -140,7 +140,7 @@ export class SealService {
         sealIdLength: cleanSealId.length,
         vaultId,
         itemId,
-        readonlyCapId,
+        accessAddress,
         clockObjectId: '0x6',
       });
 
@@ -152,10 +152,10 @@ export class SealService {
       tx.moveCall({
           target: `${SEAL_PACKAGE_ID}::seal_private_data::seal_approve`, 
           arguments: [
-              tx.pure.vector("u8", Array.from(fromHex(cleanSealId))),
+              tx.pure.vector('u8', Array.from(fromHex(cleanSealId))),
               tx.object(vaultId),
               tx.object(itemId),
-              tx.object(readonlyCapId),
+              tx.pure.address(accessAddress),
               clockObject,
         ]
       });

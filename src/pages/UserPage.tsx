@@ -453,35 +453,30 @@ export default function UserPage() {
       
       // Find ReadOnlyCap for this vault owned by the user
       setStatus('Finding access capability...')
-      const readonlyCaps = await contractService.getUserObjectsByType<{
-        objectId: string
-        fields: {
-          id: any
-          vault_id: string
-        }
-      }>(suiClient, currentAccount.address, 'ReadOnlyCap', {
-        showContent: true,
-        showType: true,
+
+      const vault = vaults.find(v => v.vaultId === vaultId)
+      if (!vault) {
+        setError('Category not found')
+        return
+      }
+
+      const tx = await contractService.buildCreateDataVaultAllowListTx({
+        vaultCapId: vault.vaultCapId,
+        vaultId: vault.vaultId,
+        accessAddress: currentAccount.address,
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      })
+
+      await signAndExecuteTransaction({
+        transaction: tx as any,
       })
       
-      console.log('Found ReadOnlyCaps:', readonlyCaps.length)
-      
-      // Find a ReadOnlyCap for this specific vault
-      const vaultReadOnlyCap = readonlyCaps.find(cap => cap.fields?.vault_id === vaultId)
-      
-      if (!vaultReadOnlyCap) {
-        throw new Error('No ReadOnlyCap found for this vault. You may need to create one first.')
-      }
-      
-      console.log('Using ReadOnlyCap:', vaultReadOnlyCap.objectId)
-
-      // Step 5: Create SessionKey (参考 SealTest.tsx)
       setStatus('Creating session key (please sign message)...')
       
       const newSessionKey = await SessionKey.create({
         address: currentAccount.address,
         packageId: SEAL_PACKAGE_ID,
-        ttlMin: 10,
+        ttlMin: 30,
         suiClient,
       })
 
@@ -500,7 +495,7 @@ export default function UserPage() {
         sealId: sealId,
         vaultId: vaultId,
         itemId: itemId,
-        readonlyCapId: vaultReadOnlyCap.objectId,
+        accessAddress: currentAccount.address,
       })
 
       const decryptedBytes = await sealService.decrypt(
@@ -509,7 +504,7 @@ export default function UserPage() {
         sealId,
         vaultId,
         itemId,
-        vaultReadOnlyCap.objectId
+        currentAccount.address
       )
 
       console.log('Decrypted successfully, size:', decryptedBytes.length)

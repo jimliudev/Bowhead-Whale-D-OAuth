@@ -17,11 +17,18 @@ const EShareExpired: u64 = 4;
 
 // === Structs ===
 
+/// Access entry with expiration time for allow list
+public struct AccessEntry has store, copy, drop {
+    address: address,
+    expires_at: u64,  // Expiration timestamp in milliseconds
+}
+
 /// Data vault for storing general data (images, videos, text)
 public struct DataVault has key {
     id: UID,
     owner: address,
     group_name: String,
+    allow_access_to: vector<AccessEntry>,  // List of addresses with expiration times
     items: vector<ID>,  // List of Data item IDs
 }
 
@@ -88,6 +95,7 @@ fun create_data_vault(
         owner,
         group_name,
         items: vector::empty(),
+        allow_access_to: vector::empty<AccessEntry>(),
     };
 
     let cap = DataVaultCap {
@@ -201,6 +209,50 @@ fun delete_data(
     object::delete(id);
 }
 
+/// Add addresses to the allow list of a data vault with expiration time
+/// Only the vault owner can modify the allow list
+/// If address already exists, update its expiration time
+/// expires_at: Expiration timestamp in milliseconds (must be in the future)
+public entry fun add_to_allow_list(
+    cap: &DataVaultCap,
+    vault: &mut DataVault,
+    access_address: address,
+    expires_at: u64,
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    assert!(cap.vault_id == object::id(vault), ENotOwner);
+    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
+    // Ensure expiration time is in the future
+    assert!(expires_at > clock::timestamp_ms(clock), EShareExpired);
+
+    // Check if address is already in the list
+    let mut found = false;
+    let mut i = 0;
+    let allow_list_len = vector::length(&vault.allow_access_to);
+    while (i < allow_list_len) {
+        let entry = vector::borrow(&vault.allow_access_to, i);
+        if (entry.address == access_address) {
+            // Update expiration time for existing entry
+            let mut updated_entry = *entry;
+            updated_entry.expires_at = expires_at;
+            *vector::borrow_mut(&mut vault.allow_access_to, i) = updated_entry;
+            found = true;
+            break
+        };
+        i = i + 1;
+    };
+    
+    // Add new entry if not found
+    if (!found) {
+        let new_entry = AccessEntry {
+            address: access_address,
+            expires_at,
+        };
+        vector::push_back(&mut vault.allow_access_to, new_entry);
+    };
+}
+
 // === Entry Functions ===
 
 /// Entry function to create a data vault
@@ -292,6 +344,20 @@ public entry fun delete_data_entry(
     // });
 }
 
+/// Entry function to add addresses to the allow list of a data vault
+/// Only the vault owner can modify the allow list
+/// expires_at: Expiration timestamp in milliseconds (must be in the future)
+public entry fun create_data_vault_allow_list(
+    cap: &DataVaultCap,
+    vault: &mut DataVault,
+    access_address: address,
+    expires_at: u64,
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    add_to_allow_list(cap, vault, access_address, expires_at, clock, ctx);
+}
+
 // === Seal Access Control ===
 
 /// Check policy for owner access
@@ -324,54 +390,115 @@ fun check_owner_policy(
 /// Check policy for read-only access
 /// Seal ID format: [vault_id_bytes][nonce]
 /// Requires valid ReadOnlyCap that hasn't expired
+/// Also checks if access_address is in the allow_access_to list and hasn't expired
 fun check_readonly_policy(
-    id: vector<u8>,
     vault: &DataVault,
     item: &Data,
-    readonly_cap: &ReadOnlyCap,
-    clock: &Clock
+    access_address: address,
+    clock: &Clock,
+    ctx: &TxContext
 ): bool {
-    // Check ReadOnlyCap is valid for this vault
-    if (readonly_cap.vault_id != object::id(vault)) {
-        return false
-    };
-
-    // Check if cap has expired
-    if (clock::timestamp_ms(clock) > readonly_cap.expires_at) {
-        return false
-    };
-
     // Check vault ID matches
     if (object::id(vault) != item.vault_id) {
         return false
     };
 
-    true
+    let caller = tx_context::sender(ctx);
+
+    if (caller != vault.owner) {
+        return false
+    };
+
+    // Check if access_address is in the allow_access_to list and hasn't expired
+    let mut i = 0;
+    let allow_list_len = vector::length(&vault.allow_access_to);
+    let current_time = clock::timestamp_ms(clock);
+    while (i < allow_list_len) {
+        let entry = vector::borrow(&vault.allow_access_to, i);
+        if (entry.address == access_address) {
+            // Check if entry hasn't expired
+            if (current_time <= entry.expires_at) {
+                return true
+            } else {
+                // Entry has expired
+                return false
+            }
+        };
+        i = i + 1;
+    };
+
+    false
+}
+
+/// Remove expired entries from the allow list
+/// Only the vault owner can clean the allow list
+public entry fun clean_expired_allow_list(
+    cap: &DataVaultCap,
+    vault: &mut DataVault,
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    assert!(cap.vault_id == object::id(vault), ENotOwner);
+    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
+
+    let current_time = clock::timestamp_ms(clock);
+    let mut i = 0;
+    while (i < vector::length(&vault.allow_access_to)) {
+        let entry = vector::borrow(&vault.allow_access_to, i);
+        if (entry.expires_at < current_time) {
+            // Entry has expired, remove it
+            vector::remove(&mut vault.allow_access_to, i);
+        } else {
+            i = i + 1;
+        };
+    };
+}
+
+/// Remove a specific address from the allow list
+/// Only the vault owner can remove addresses
+public entry fun remove_from_allow_list(
+    cap: &DataVaultCap,
+    vault: &mut DataVault,
+    access_address: address,
+    ctx: &TxContext
+) {
+    assert!(cap.vault_id == object::id(vault), ENotOwner);
+    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
+
+    let mut i = 0;
+    while (i < vector::length(&vault.allow_access_to)) {
+        let entry = vector::borrow(&vault.allow_access_to, i);
+        if (entry.address == access_address) {
+            vector::remove(&mut vault.allow_access_to, i);
+            break
+        };
+        i = i + 1;
+    };
 }
 
 public fun check_seal_approve_for_test(
-    id: vector<u8>,
     vault: &DataVault,
     item: &Data,
-    readonly_cap: &ReadOnlyCap,
+    access_address: address,
     clock: &Clock,
-    _ctx: &TxContext) : bool{
-    let result = check_readonly_policy(id, vault, item, readonly_cap, clock);
+    ctx: &TxContext) : bool{
+    let result = check_readonly_policy(vault, item, access_address, clock, ctx);
     result
 }
 
 /// Seal approve function for read-only access
 /// Allows holders of ReadOnlyCap to decrypt data (read-only access)
 /// Requires valid ReadOnlyCap that hasn't expired
+/// Also checks if caller is in the allow_access_to list
 public entry fun seal_approve(
     id: vector<u8>,
     vault: &DataVault,
     item: &Data,
-    readonly_cap: &ReadOnlyCap,
+    access_address: address,
     clock: &Clock,
-    _ctx: &TxContext
+    ctx: &TxContext
 ) {
-    assert!(check_readonly_policy(id, vault, item, readonly_cap, clock), ENoAccess);
+    assert!(check_readonly_policy(vault, item, access_address, clock, ctx), ENoAccess);
 }
 
 /// Check policy for OAuth access
@@ -509,5 +636,18 @@ public fun get_item_info_readonly(
     // Check if cap has expired
     assert!(clock::timestamp_ms(clock) <= readonly_cap.expires_at, EShareExpired);
     get_item_info(item)
+}
+
+/// Get allow list information
+/// Returns vector of addresses and their expiration times
+/// Only vault owner can view this information
+public fun get_allow_list_info(
+    cap: &DataVaultCap,
+    vault: &DataVault,
+    ctx: &TxContext
+): vector<AccessEntry> {
+    assert!(cap.vault_id == object::id(vault), ENotOwner);
+    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
+    vault.allow_access_to
 }
 
