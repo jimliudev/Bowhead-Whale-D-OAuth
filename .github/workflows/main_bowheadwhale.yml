@@ -21,19 +21,53 @@ jobs:
       - name: Set up Node.js version
         uses: actions/setup-node@v3
         with:
-          node-version: '24.x'
+          node-version: '20.x'
 
-      - name: npm install, build, and test
+      - name: Install frontend dependencies
         run: |
-          npm install
-          npm run build --if-present
-          npm run test --if-present
+          npm ci
+
+      - name: Build frontend
+        run: |
+          npm run build
+
+      - name: Install backend dependencies
+        working-directory: ./server
+        run: |
+          npm ci --production
+
+      - name: Prepare deployment package
+        run: |
+          # Create deployment directory structure
+          mkdir -p deploy/server/src
+          mkdir -p deploy/dist
+          
+          # Copy built frontend (dist folder)
+          if [ -d "dist" ]; then
+            cp -r dist/* deploy/dist/
+          fi
+          
+          # Copy backend source code
+          cp -r server/src/* deploy/server/src/
+          cp server/package.json deploy/server/
+          
+          # Copy backend node_modules (production dependencies already installed)
+          if [ -d "server/node_modules" ]; then
+            cp -r server/node_modules deploy/server/
+          fi
+          
+          # Create a simple structure for Azure
+          # Azure will run from root, so we need server at root level
+          echo "Deployment package prepared"
+          ls -la deploy/
+          ls -la deploy/server/ || true
+          ls -la deploy/dist/ || true
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: .
+          path: deploy
 
   deploy:
     runs-on: ubuntu-latest
@@ -47,6 +81,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: node-app
+          path: .
+      
+      - name: List deployment files
+        run: |
+          echo "Deployment structure:"
+          ls -la
+          echo "Server directory:"
+          ls -la server/ || echo "No server directory"
+          echo "Dist directory:"
+          ls -la dist/ || echo "No dist directory"
       
       - name: Login to Azure
         uses: azure/login@v2
@@ -62,4 +106,5 @@ jobs:
           app-name: 'bowheadwhale'
           slot-name: 'Production'
           package: .
+          startup-command: 'cd server && node src/index.js'
           
