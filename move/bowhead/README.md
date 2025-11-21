@@ -293,4 +293,6 @@ feature
 ✅ user create text
 ❌ user read text (讀不回來)
 ❌ user basic info
+❌ user read text don't need sign twice
 ❌ doc教學文章頁面。how to connect this service.
+

@@ -16,13 +16,6 @@ import Header from '../components/Header'
 import './css/PageLayout.css'
 import './css/UserPage.css'
 
-// const suiClient = new SuiClient({
-//   url: getFullnodeUrl('testnet'),
-//   network: 'testnet',
-// }).$extend(
-//   walrus(),
-// )
-
 const suiClient = new SuiJsonRpcClient({
 	url: getFullnodeUrl('testnet'),
 	network: 'testnet',
