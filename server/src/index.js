@@ -44,12 +44,24 @@ const getEncryptionSealId = () => {
 };
 
 // Initialize Sui Client with Walrus extension
+// Set timeout to 2 minutes (120000ms) for external service calls
 const suiClient = new SuiClient({
   url: getFullnodeUrl(process.env.SUI_NETWORK || 'testnet'),
   network: process.env.SUI_NETWORK || 'testnet',
+  fetchOptions: {
+    // Set timeout for HTTP requests (2 minutes)
+    signal: null, // Will be handled per request
+  },
 }).$extend(
   walrus({
     wasmUrl: 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm',
+    // Set timeout for Walrus storage node operations (2 minutes)
+    storageNodeClientOptions: {
+      timeout: 120000, // 2 minutes in milliseconds
+      onError: (error) => {
+        console.warn('Storage node error:', error);
+      },
+    },
   })
 );
 
@@ -224,7 +236,12 @@ app.get('/api/walrus/read/:blobId', async (req, res) => {
 });
 
 // Decrypt data using Seal
+// Set timeout to 2 minutes for this endpoint
 app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
+  // Set response timeout to 2 minutes (120000ms)
+  req.setTimeout(120000);
+  res.setTimeout(120000);
+  
   try {
     const { accessToken, vaultId, itemId } = req.body;
 
@@ -254,13 +271,18 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
 
     // Step 1: Get Data object from chain to extract blob ID and nonce
     console.log('📡 Fetching Data object from chain...');
-    const dataObject = await suiClient.getObject({
-      id: itemId,
-      options: {
-        showContent: true,
-        showType: true,
-      },
-    });
+    const dataObject = await Promise.race([
+      suiClient.getObject({
+        id: itemId,
+        options: {
+          showContent: true,
+          showType: true,
+        },
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout: Failed to fetch Data object from chain (2 minutes)')), 120000)
+      ),
+    ]);
 
     if (!dataObject.data?.content || !('fields' in dataObject.data.content)) {
       return res.status(404).json({
@@ -285,7 +307,13 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
 
     // Step 2: Read encrypted blob from Walrus
     console.log('📥 Reading encrypted blob from Walrus...');
-    const encryptedBlob = await suiClient.walrus.readBlob({ blobId });
+    // Set timeout for Walrus read operation (2 minutes)
+    const encryptedBlob = await Promise.race([
+      suiClient.walrus.readBlob({ blobId }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout: Failed to read blob from Walrus (2 minutes)')), 120000)
+      ),
+    ]);
     console.log('✅ Encrypted blob retrieved, size:', encryptedBlob.length);
 
     // Step 3: Import SessionKey from base64
@@ -329,6 +357,7 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
 
     // Step 6: Create SealClient
     console.log('🔧 Creating SealClient...');
+    // SealClient may need longer timeout for key server communication
     const sealClient = new SealClient({
       suiClient,
       serverConfigs: SEAL_KEY_SERVER_OBJECT_IDS.map((id) => ({
@@ -336,6 +365,8 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
         weight: 1,
       })),
       verifyKeyServers: false,
+      // Note: SealClient doesn't expose timeout config directly,
+      // but we'll handle timeout at the decrypt call level
     });
     console.log('✅ SealClient created');
 
@@ -364,12 +395,18 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
 
     // Step 8: Decrypt using Seal
     console.log('🔓 Decrypting data...');
-    const decryptedBytes = await sealClient.decrypt({
-      data: encryptedBlob,
-      sessionKey,
-      txBytes,
-    });
-
+    // Set timeout for Seal decryption (2 minutes)
+    // Seal decryption may need to contact multiple key servers to retrieve slivers
+    const decryptedBytes = await Promise.race([
+      sealClient.decrypt({
+        data: encryptedBlob,
+        sessionKey,
+        txBytes,
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout: Failed to decrypt data. Unable to retrieve enough slivers from key servers (2 minutes)')), 120000)
+      ),
+    ]);
     console.log('✅ Decryption successful, decrypted data length:', decryptedBytes.length);
 
     // Step 9: Convert decrypted bytes to base64 for response
@@ -388,6 +425,15 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Seal decryption error:', error);
+    
+    // Handle timeout errors specifically
+    if (error.message?.includes('Timeout') || error.message?.includes('slivers')) {
+      return res.status(504).json({
+        success: false,
+        error: error.message || 'Request timeout: Failed to decrypt data. Unable to retrieve enough slivers from key servers. This may be due to network issues, key server unavailability, or insufficient storage node responses.',
+      });
+    }
+    
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to decrypt data',
