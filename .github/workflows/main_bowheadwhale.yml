@@ -40,11 +40,12 @@ jobs:
         run: |
           # Create deployment directory structure
           mkdir -p deploy/server/src
-          mkdir -p deploy/dist
+          mkdir -p deploy/server/dist
           
-          # Copy built frontend (dist folder)
+          # Copy built frontend (dist folder) to server/dist
+          # This matches the path in server/src/index.js: path.join(__dirname, '../dist')
           if [ -d "dist" ]; then
-            cp -r dist/* deploy/dist/
+            cp -r dist/* deploy/server/dist/
           fi
           
           # Copy backend source code
@@ -56,12 +57,13 @@ jobs:
             cp -r server/node_modules deploy/server/
           fi
           
-          # Create a simple structure for Azure
-          # Azure will run from root, so we need server at root level
-          echo "Deployment package prepared"
+          # Verify structure
+          echo "Deployment package structure:"
           ls -la deploy/
+          echo "Server directory:"
           ls -la deploy/server/ || true
-          ls -la deploy/dist/ || true
+          echo "Server/dist directory:"
+          ls -la deploy/server/dist/ || true
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
