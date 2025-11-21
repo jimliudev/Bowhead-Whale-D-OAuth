@@ -11,7 +11,7 @@ import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { SEAL_PACKAGE_ID } from '../config'
 import { contractService } from '../services/contractService'
 import './css/PageLayout.css'
-import './css/DOAuthPageNewWindow.css'
+import './css/DoAuthPageNewWindow.css'
 
 const suiClient = new SuiClient({
   url: getFullnodeUrl('testnet'),

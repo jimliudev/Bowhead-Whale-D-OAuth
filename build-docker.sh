@@ -7,7 +7,7 @@ set -e
 echo "🐋 Building Bowhead Whale Docker image..."
 
 # Build the Docker image
-docker build -t bowhead-whale:latest .
+docker build -f Dockerfile -t bowhead-whale:latest .
 
 echo "✅ Build complete!"
 echo ""

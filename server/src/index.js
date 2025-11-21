@@ -9,7 +9,6 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SessionKey, SealClient } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex } from '@mysten/sui/utils';
-import { cache } from './cache.js';
 
 dotenv.config();
 
@@ -18,6 +17,11 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '50mb' })); // Increase limit for encrypted data
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Seal configuration
 const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || '0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3';
@@ -55,11 +59,6 @@ const getKeypair = () => {
   return Ed25519Keypair.fromSecretKey(privateKey);
 };
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Increase limit for encrypted data
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-
 // API Routes
 app.get('/api/health', (req, res) => {
   res.json({
@@ -67,152 +66,6 @@ app.get('/api/health', (req, res) => {
     message: 'Bowhead Whale API is running',
     timestamp: new Date().toISOString(),
   });
-});
-
-// Cache API
-// Get cache value
-app.get('/api/cache/:key', (req, res) => {
-  try {
-    const { key } = req.params;
-    
-    if (!key) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing cache key',
-      });
-    }
-
-    const value = cache.get(key);
-    
-    if (value === null) {
-      return res.status(404).json({
-        success: false,
-        error: 'Cache key not found',
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        key,
-        value,
-      },
-    });
-  } catch (error) {
-    console.error('Cache get error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to get cache value',
-    });
-  }
-});
-
-// Set cache value
-app.post('/api/cache', (req, res) => {
-  try {
-    const { key, value, ttl } = req.body;
-    
-    if (!key) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: key',
-      });
-    }
-
-    if (value === undefined) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: value',
-      });
-    }
-
-    // Set cache with optional TTL (in seconds)
-    const success = cache.set(key, value, ttl || null);
-
-    if (!success) {
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to set cache value',
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Cache value set successfully',
-      data: {
-        key,
-        ttl: ttl || null,
-      },
-    });
-  } catch (error) {
-    console.error('Cache set error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to set cache value',
-    });
-  }
-});
-
-// Delete cache value
-app.delete('/api/cache/:key', (req, res) => {
-  try {
-    const { key } = req.params;
-    
-    if (!key) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing cache key',
-      });
-    }
-
-    const deleted = cache.delete(key);
-
-    res.json({
-      success: true,
-      message: deleted ? 'Cache entry deleted' : 'Cache entry not found',
-      deleted,
-    });
-  } catch (error) {
-    console.error('Cache delete error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to delete cache value',
-    });
-  }
-});
-
-// Get cache statistics
-app.get('/api/cache/stats', (req, res) => {
-  try {
-    const stats = cache.getStats();
-    res.json({
-      success: true,
-      data: stats,
-    });
-  } catch (error) {
-    console.error('Cache stats error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to get cache statistics',
-    });
-  }
-});
-
-// Clear all cache
-app.delete('/api/cache', (req, res) => {
-  try {
-    cache.clear();
-    res.json({
-      success: true,
-      message: 'All cache entries cleared',
-    });
-  } catch (error) {
-    console.error('Cache clear error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to clear cache',
-    });
-  }
 });
 
 // Upload encrypted data to Walrus
@@ -542,18 +395,25 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
   }
 });
 
-// Serve static files from React build in production
-if (process.env.NODE_ENV === 'production') {
-  const buildPath = path.join(__dirname, '../../dist');
-  app.use(express.static(buildPath));
-  
-  // Serve React app for all non-API routes
-  app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(buildPath, 'index.html'));
-    }
-  });
-}
+// Serve static files from React build
+// In Docker: __dirname is /app/src, dist is at /app/dist
+const buildPath = path.join(__dirname, '../dist');
+app.use(express.static(buildPath));
+
+// Serve React app for all non-API routes (SPA fallback for React Router)
+// This must be after all API routes
+app.get('*', (req, res) => {
+  // Only serve index.html for non-API routes
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(path.join(buildPath, 'index.html'));
+  } else {
+    // API route not found
+    res.status(404).json({
+      success: false,
+      error: 'API endpoint not found',
+    });
+  }
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -568,7 +428,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 API available at http://localhost:${PORT}/api`);
-  if (process.env.NODE_ENV === 'production') {
-    console.log(`🌐 Frontend served from /dist`);
-  }
+  console.log(`🌐 Frontend served from ${buildPath}`);
 });

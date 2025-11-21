@@ -34,6 +34,7 @@ export function example2() {
 }
 
 // Example 3: In a React component
+// Note: This is a TypeScript example. In actual React component, use .tsx extension
 export function ExampleComponent() {
   const handleOpenOAuth = () => {
     const serviceId = '0x3f58a419f88a0b054daebff43c2a759a7a390a6f749cfc991793134cf6a89e21'
@@ -48,11 +49,9 @@ export function ExampleComponent() {
     }
   }
   
-  return (
-    <button onClick={handleOpenOAuth}>
-      Authorize Service
-    </button>
-  )
+  // In actual React component (.tsx), you would return JSX like:
+  // return <button onClick={handleOpenOAuth}>Authorize Service</button>
+  return null
 }
 
 // Example 4: In a button click handler
