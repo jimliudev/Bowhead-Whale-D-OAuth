@@ -6,6 +6,9 @@ import { fileURLToPath } from 'url';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { walrus } from '@mysten/walrus';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
+import { SessionKey, SealClient } from '@mysten/seal';
+import { Transaction } from '@mysten/sui/transactions';
+import { fromHex } from '@mysten/sui/utils';
 import { cache } from './cache.js';
 
 dotenv.config();
@@ -15,6 +18,26 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Seal configuration
+const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || '0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3';
+const SEAL_PACKAGE_ID_ACCESS_DATA_POLICY = 'BOWHEADWHALE-D-OAUTH_ACCESS-DATA-POLICY';
+const SEAL_KEY_SERVER_OBJECT_IDS = [
+  '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
+  '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8'
+];
+
+// Helper function to convert string to hex
+const stringToHexString = (str) => {
+  return Array.from(new TextEncoder().encode(str))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+};
+
+// Helper function to get encryption Seal ID
+const getEncryptionSealId = () => {
+  return stringToHexString(SEAL_PACKAGE_ID_ACCESS_DATA_POLICY);
+};
 
 // Initialize Sui Client with Walrus extension
 const suiClient = new SuiClient({
@@ -343,6 +366,178 @@ app.get('/api/walrus/read/:blobId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to read from Walrus',
+    });
+  }
+});
+
+// Decrypt data using Seal
+app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
+  try {
+    const { accessToken, vaultId, itemId } = req.body;
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: accessToken',
+      });
+    }
+
+    if (!vaultId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: vaultId',
+      });
+    }
+
+    if (!itemId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: itemId',
+      });
+    }
+
+    console.log('🔓 Starting decryption process...');
+    console.log('📋 Parameters:', { vaultId, itemId });
+
+    // Step 1: Get Data object from chain to extract blob ID and nonce
+    console.log('📡 Fetching Data object from chain...');
+    const dataObject = await suiClient.getObject({
+      id: itemId,
+      options: {
+        showContent: true,
+        showType: true,
+      },
+    });
+
+    if (!dataObject.data?.content || !('fields' in dataObject.data.content)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Data object not found',
+      });
+    }
+
+    const fields = dataObject.data.content.fields;
+    const blobId = fields.value;
+    const nonce = fields.nonce || [];
+    const dataVaultId = fields.vault_id || vaultId;
+
+    if (!blobId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Data object does not contain blob ID',
+      });
+    }
+
+    console.log('✅ Data object retrieved:', { blobId, nonceLength: nonce.length });
+
+    // Step 2: Read encrypted blob from Walrus
+    console.log('📥 Reading encrypted blob from Walrus...');
+    const encryptedBlob = await suiClient.walrus.readBlob({ blobId });
+    console.log('✅ Encrypted blob retrieved, size:', encryptedBlob.length);
+
+    // Step 3: Import SessionKey from base64
+    console.log('🔑 Importing SessionKey from base64...');
+    let sessionKey;
+    try {
+      // Decode base64 to JSON string
+      // The base64 was encoded using: btoa(unescape(encodeURIComponent(jsonString)))
+      // In Node.js, we need to reverse this process
+      // Buffer.from(base64, 'base64') gives us the binary string
+      // Then we need to decode it properly
+      const binaryString = Buffer.from(accessToken, 'base64').toString('binary');
+      // Convert binary string to UTF-8, handling the unescape/encodeURIComponent reversal
+      const jsonString = Buffer.from(binaryString, 'binary').toString('utf-8');
+      const keyData = JSON.parse(jsonString);
+      
+      console.log('📋 SessionKey data:', {
+        address: keyData.address,
+        packageId: keyData.packageId,
+        hasSignature: !!keyData.personalMessageSignature,
+      });
+      
+      // Import SessionKey
+      sessionKey = SessionKey.import(keyData, suiClient);
+      console.log('✅ SessionKey imported');
+    } catch (error) {
+      console.error('❌ Failed to import SessionKey:', error);
+      return res.status(400).json({
+        success: false,
+        error: `Failed to import SessionKey: ${error.message}`,
+      });
+    }
+
+    // Step 4: Get access address from SessionKey
+    const accessAddress = sessionKey.getAddress();
+    console.log('👤 Access address:', accessAddress);
+
+    // Step 5: Get Seal ID (using encryption Seal ID)
+    const sealId = getEncryptionSealId();
+    console.log('🔐 Seal ID:', sealId);
+
+    // Step 6: Create SealClient
+    console.log('🔧 Creating SealClient...');
+    const sealClient = new SealClient({
+      suiClient,
+      serverConfigs: SEAL_KEY_SERVER_OBJECT_IDS.map((id) => ({
+        objectId: id,
+        weight: 1,
+      })),
+      verifyKeyServers: false,
+    });
+    console.log('✅ SealClient created');
+
+    // Step 7: Build transaction for seal_approve
+    console.log('📝 Building transaction...');
+    const tx = new Transaction();
+    const clockObject = tx.object('0x6');
+    
+    // Clean seal ID (remove 0x prefix)
+    const cleanSealId = sealId.replace(/^0x/i, '');
+    
+    tx.moveCall({
+      target: `${SEAL_PACKAGE_ID}::seal_private_data::seal_approve`,
+      arguments: [
+        tx.pure.vector('u8', Array.from(fromHex(cleanSealId))),
+        tx.object(dataVaultId),
+        tx.object(itemId),
+        tx.pure.address(accessAddress),
+        clockObject,
+      ],
+    });
+
+    // Build transaction bytes
+    const txBytes = await tx.build({ client: suiClient, onlyTransactionKind: true });
+    console.log('✅ Transaction built, length:', txBytes.length);
+
+    // Step 8: Decrypt using Seal
+    console.log('🔓 Decrypting data...');
+    const decryptedBytes = await sealClient.decrypt({
+      data: encryptedBlob,
+      sessionKey,
+      txBytes,
+    });
+
+    console.log('✅ Decryption successful, decrypted data length:', decryptedBytes.length);
+
+    // Step 9: Convert decrypted bytes to base64 for response
+    const decryptedBase64 = Buffer.from(decryptedBytes).toString('base64');
+
+    res.json({
+      success: true,
+      message: 'Data decrypted successfully',
+      data: {
+        decryptedData: decryptedBase64,
+        size: decryptedBytes.length,
+        blobId,
+        vaultId: dataVaultId,
+        itemId,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Seal decryption error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to decrypt data',
     });
   }
 });

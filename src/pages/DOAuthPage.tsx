@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   useCurrentAccount,
+  useCurrentWallet,
   useSignAndExecuteTransaction,
   useDisconnectWallet,
   ConnectButton,
@@ -10,6 +11,7 @@ import { Transaction } from '@mysten/sui/transactions'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { SEAL_PACKAGE_ID } from '../config'
 import { contractService } from '../services/contractService'
+import { SealService } from '../services/sealService'
 import './css/PageLayout.css'
 import './css/DOAuthPage.css'
 
@@ -21,6 +23,7 @@ const suiClient = new SuiClient({
 export default function DOAuthPage() {
   const [searchParams] = useSearchParams()
   const currentAccount = useCurrentAccount()
+  const { currentWallet } = useCurrentWallet()
   const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction()
   const { mutate: disconnect } = useDisconnectWallet()
   
@@ -44,6 +47,8 @@ export default function DOAuthPage() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('')
   const [loadingService, setLoadingService] = useState(true)
+  const [authorizationSuccess, setAuthorizationSuccess] = useState(false)
+  const [grantId, setGrantId] = useState<string | null>(null)
 
   // Fetch service information using contractService
   useEffect(() => {
@@ -194,8 +199,8 @@ export default function DOAuthPage() {
       // Generate access token
       const accessToken = generateAccessToken()
 
-      // Calculate expiration (30 days from now)
-      const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000
+      // Calculate expiration (30 mins from now)
+      const expiresAt = Date.now() + 30 * 60 * 1000
 
       // Get unique vault IDs from selected resources
       const selectedItems = userDataItems.filter((item) =>
@@ -211,23 +216,46 @@ export default function DOAuthPage() {
         return
       }
 
-      // Get service owner address (the address that will receive the ReadOnlyCap)
+      // Get service owner address (the address that will be added to allow list)
       // serviceAddress is the service ID, we need to get the owner from serviceInfo
       const serviceOwnerAddress = serviceInfo.owner || serviceAddress
+
+      // Get user's DataVaultCap objects to find the corresponding caps for each vault
+      const vaultCaps = await contractService.getUserObjectsByType(
+        suiClient,
+        currentAccount.address,
+        'DataVaultCap',
+        { showContent: true }
+      )
+
+      // Create a map of vaultId -> vaultCapId
+      const vaultCapMap = new Map<string, string>()
+      for (const cap of vaultCaps) {
+        if (cap.fields?.vault_id) {
+          vaultCapMap.set(cap.fields.vault_id, cap.objectId)
+        }
+      }
 
       // Create transaction with multiple operations
       const tx = new Transaction()
 
-      // Step 1: Create ReadOnlyCap for each unique vault
-      // Using contractService.buildCreateReadOnlyCapTx pattern
+      // Step 1: Add service owner address to allow list for each unique vault
       for (const vaultId of uniqueVaultIds) {
+        const vaultCapId = vaultCapMap.get(vaultId)
+        if (!vaultCapId) {
+          console.warn(`No DataVaultCap found for vault ${vaultId}`)
+          continue
+        }
+
+        // Add service owner to allow list
         tx.moveCall({
-          target: `${SEAL_PACKAGE_ID}::seal_private_data::create_readonly_cap_entry`,
+          target: `${SEAL_PACKAGE_ID}::seal_private_data::create_data_vault_allow_list`,
           arguments: [
+            tx.object(vaultCapId),
             tx.object(vaultId),
+            tx.pure.address(serviceOwnerAddress),
             tx.pure.u64(expiresAt),
             tx.object('0x6'), // Clock
-            tx.pure.address(serviceOwnerAddress),
           ],
         })
       }
@@ -255,30 +283,32 @@ export default function DOAuthPage() {
 
       // Extract grant ID from result
       const resultAny = result as any
-      let grantId: string | null = null
+      let extractedGrantId: string | null = null
       if (resultAny.objectChanges) {
         const grantChange = resultAny.objectChanges.find(
           (change: any) =>
             change.type === 'created' && change.objectType?.includes('OAuthGrant')
         )
         if (grantChange) {
-          grantId = grantChange.objectId
+          extractedGrantId = grantChange.objectId
         }
       }
 
-      setStatus('✅ Authorization successful! Redirecting...')
+      console.log('Authorization successful, setting states...', {
+        grantId: extractedGrantId,
+        accessToken: accessToken, // This is the temporary token for grant creation
+      })
 
-      // Redirect to service's redirect URL with access token
-      const redirectUrl = new URL(serviceInfo.redirectUrl)
-      redirectUrl.searchParams.set('access_token', accessToken)
-      if (grantId) {
-        redirectUrl.searchParams.set('grant_id', grantId)
-      }
-
-      // Wait a moment for user to see success message
-      setTimeout(() => {
-        window.location.href = redirectUrl.toString()
-      }, 2000)
+      // Save authorization result and show success page
+      // IMPORTANT: Set these states in the correct order to prevent any race conditions
+      setGrantId(extractedGrantId)
+      setError(null) // Clear any previous errors
+      setStatus('✅ Authorization successful!')
+      
+      // Set authorization success last to ensure all other states are set first
+      setAuthorizationSuccess(true)
+      
+      console.log('States set, should show success page now. authorizationSuccess:', true)
     } catch (err: any) {
       const errorMsg = err?.message || err?.toString() || 'Authorization failed'
       setError(`Authorization failed: ${errorMsg}`)
@@ -287,6 +317,105 @@ export default function DOAuthPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const sealService = new SealService()
+
+  const handleGenerateAccessToken = async () => {
+    if (!serviceInfo) {
+      setError('Missing service information')
+      return
+    }
+
+    if (!isConnected || !currentAccount || !currentWallet) {
+      setError('Please connect your wallet first')
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    setStatus('Generating SessionKey...')
+
+    try {
+      // Use SealService to create and export SessionKey as base64
+      setStatus('Please sign in your wallet to create SessionKey...')
+      const sessionKeyBase64 = await sealService.createAndExportSessionKeyAsBase64(
+        currentAccount.address,
+        currentWallet,
+        currentAccount,
+        suiClient,
+        10 // ttlMin: 10 minutes
+      )
+
+      console.log('✅ SessionKey created and exported as base64')
+
+      setStatus('Redirecting to service...')
+
+      // Redirect to service's redirect URL with base64 encoded SessionKey as access token
+      const redirectUrl = new URL(serviceInfo.redirectUrl)
+      redirectUrl.searchParams.set('access_token', sessionKeyBase64)
+      if (grantId) {
+        redirectUrl.searchParams.set('grant_id', grantId)
+      }
+
+      // Redirect immediately
+      window.location.href = redirectUrl.toString()
+    } catch (err: any) {
+      const errorMsg = err?.message || err?.toString() || 'Failed to generate access token'
+      setError(`Failed to generate access token: ${errorMsg}`)
+      setStatus('❌ Failed to generate access token')
+      console.error('Generate access token error:', err)
+      setLoading(false)
+    }
+  }
+
+  // Show authorization success page
+  // IMPORTANT: This check must come before any other conditional renders
+  if (authorizationSuccess) {
+    console.log('Rendering authorization success page')
+    return (
+      <div className="oauth-page">
+        <div className="oauth-container">
+          <div className="oauth-card">
+            <div className="oauth-header">
+              <div className="oauth-header-top">
+                <div className="oauth-logo">🐋</div>
+                <div className="oauth-header-text">
+                  <h1 className="oauth-title">✅ Authorization Successful</h1>
+                  <p className="oauth-subtitle">
+                    Your authorization has been completed successfully.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="oauth-content">
+              <div className="oauth-success-message">
+                <div className="success-icon">✓</div>
+                <h2>Ready to Generate Access Token</h2>
+                <p>
+                  Click the button below to generate the access token and redirect to the service.
+                </p>
+                
+                {grantId && (
+                  <div className="grant-info">
+                    <p><strong>Grant ID:</strong> {grantId}</p>
+                  </div>
+                )}
+
+                <button
+                  className="oauth-authorize-button"
+                  onClick={handleGenerateAccessToken}
+                  disabled={loading}
+                >
+                  {loading ? 'Processing...' : '产生 accessToken to service'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (!serviceAddress) {

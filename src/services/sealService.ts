@@ -4,6 +4,7 @@ import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { stringToHexString } from "./utils";
 import { fromHex, toHex } from "@mysten/sui/utils";
 import { Transaction } from "@mysten/sui/transactions";
+import type { WalletAccount, WalletWithFeatures } from "@mysten/wallet-standard";
 
 export interface SealConfig {
   keyServerUrl: string;
@@ -31,7 +32,7 @@ export class SealService {
    * @returns 加密後的數據部分
    */
   async encrypt(
-    id: string,
+    _id: string,
     data: Uint8Array,
   ): Promise<EncryptedData> {
     try {
@@ -217,6 +218,186 @@ export class SealService {
     } catch (error) {
       console.error('Seal key server error:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 序列化 SessionKey 為 JSON 字符串
+   * 注意：export() 返回的對象有自定義 toJSON 會拋錯，需要手動構建可序列化的對象
+   * @param key SessionKey 對象
+   * @returns JSON 字符串
+   */
+  serializeSessionKey(key: SessionKey): string {
+    try {
+      const exported = key.export()
+      // 手動構建可序列化的對象，避免觸發 export() 返回對象的 toJSON 錯誤
+      const serializable: {
+        address: string
+        packageId: string
+        mvrName?: string
+        creationTimeMs: number
+        ttlMin: number
+        personalMessageSignature?: string
+        sessionKey: string
+      } = {
+        address: exported.address,
+        packageId: exported.packageId,
+        creationTimeMs: exported.creationTimeMs,
+        ttlMin: exported.ttlMin,
+        sessionKey: exported.sessionKey,
+      }
+      if (exported.mvrName) {
+        serializable.mvrName = exported.mvrName
+      }
+      if (exported.personalMessageSignature) {
+        serializable.personalMessageSignature = exported.personalMessageSignature
+      }
+      return JSON.stringify(serializable, null, 2)
+    } catch (err) {
+      console.error('序列化 SessionKey 失敗:', err)
+      throw new Error('無法序列化 SessionKey')
+    }
+  }
+
+  /**
+   * 簽名個人消息
+   * @param wallet 錢包對象
+   * @param account 賬戶對象
+   * @param message 要簽名的消息（Uint8Array）
+   * @returns 簽名字符串
+   */
+  async signPersonalMessage(
+    wallet: WalletWithFeatures<any>,
+    account: WalletAccount,
+    message: Uint8Array
+  ): Promise<string> {
+    try {
+      // Try to use wallet's signPersonalMessage feature
+      const signPersonalMessageFeature = (wallet.features as any)['sui:signPersonalMessage']
+      if (signPersonalMessageFeature) {
+        const result = await signPersonalMessageFeature.signPersonalMessage({
+          message,
+          account,
+        })
+        return result.signature
+      }
+
+      // Fallback to signMessage
+      const signMessageFeature = (wallet.features as any)['sui:signMessage']
+      if (signMessageFeature) {
+        const result = await signMessageFeature.signMessage({
+          message,
+          account,
+        })
+        return result.signature
+      }
+
+      throw new Error('錢包不支持簽名個人消息')
+    } catch (err: any) {
+      console.error('簽名錯誤:', err)
+      throw new Error(`簽名失敗: ${err?.message || err?.toString()}`)
+    }
+  }
+
+  /**
+   * 創建、簽名並導出 SessionKey 為 base64 字符串
+   * @param address 用戶地址
+   * @param wallet 錢包對象
+   * @param account 賬戶對象
+   * @param suiClient Sui 客戶端
+   * @param ttlMin SessionKey 的 TTL（分鐘），默認 10 分鐘
+   * @returns base64 編碼的 SessionKey JSON 字符串
+   */
+  async createAndExportSessionKeyAsBase64(
+    address: string,
+    wallet: WalletWithFeatures<any>,
+    account: WalletAccount,
+    suiClient: SuiClient,
+    ttlMin: number = 10
+  ): Promise<string> {
+    try {
+      console.log('🔑 Creating SessionKey...')
+      
+      // Create SessionKey
+      const sessionKey = await SessionKey.create({
+        address,
+        packageId: SEAL_PACKAGE_ID,
+        ttlMin,
+        suiClient,
+      })
+
+      console.log('📝 SessionKey created, requesting signature...')
+
+      // Sign personal message
+      const personalMessage = sessionKey.getPersonalMessage()
+      const signature = await this.signPersonalMessage(wallet, account, personalMessage)
+      await sessionKey.setPersonalMessageSignature(signature)
+
+      console.log('✅ SessionKey signed, exporting...')
+
+      // Export SessionKey to JSON
+      const sessionKeyJson = this.serializeSessionKey(sessionKey)
+      console.log('📦 SessionKey JSON exported')
+
+      // Convert JSON to base64
+      const sessionKeyBase64 = btoa(unescape(encodeURIComponent(sessionKeyJson)))
+      console.log('🔐 SessionKey converted to base64')
+
+      return sessionKeyBase64
+    } catch (error) {
+      console.error('Failed to create and export SessionKey:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 從 base64 編碼的字符串解析並恢復 SessionKey 對象
+   * @param base64String base64 編碼的 SessionKey JSON 字符串
+   * @param suiClient Sui 客戶端
+   * @param wallet 可選的錢包對象（如果需要重新簽名）
+   * @param account 可選的賬戶對象（如果需要重新簽名）
+   * @returns 恢復的 SessionKey 對象
+   */
+  async importSessionKeyFromBase64(
+    base64String: string,
+    suiClient: SuiClient,
+    wallet?: WalletWithFeatures<any>,
+    account?: WalletAccount
+  ): Promise<SessionKey> {
+    try {
+      console.log('📥 Decoding base64 SessionKey...')
+      
+      // Decode base64 to JSON string
+      const jsonString = decodeURIComponent(escape(atob(base64String)))
+      console.log('📦 SessionKey JSON decoded')
+      
+      // Parse JSON
+      const keyData = JSON.parse(jsonString)
+      console.log('📋 Parsed SessionKey data:', {
+        address: keyData.address,
+        packageId: keyData.packageId,
+        hasSignature: !!keyData.personalMessageSignature,
+      })
+      
+      // Import SessionKey using SessionKey.import
+      const restoredSessionKey = SessionKey.import(keyData, suiClient)
+      console.log('✅ SessionKey object restored')
+      
+      // Check if signature is missing or needs to be refreshed
+      if (!keyData.personalMessageSignature && wallet && account) {
+        console.log('⚠️ SessionKey missing signature, requesting new signature...')
+        const personalMessage = restoredSessionKey.getPersonalMessage()
+        const signature = await this.signPersonalMessage(wallet, account, personalMessage)
+        await restoredSessionKey.setPersonalMessageSignature(signature)
+        console.log('✅ SessionKey signed')
+      } else if (!keyData.personalMessageSignature) {
+        console.warn('⚠️ SessionKey missing signature, but no wallet provided for signing')
+      }
+      
+      return restoredSessionKey
+    } catch (error) {
+      console.error('Failed to import SessionKey from base64:', error)
+      throw new Error(`Failed to import SessionKey: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 }
