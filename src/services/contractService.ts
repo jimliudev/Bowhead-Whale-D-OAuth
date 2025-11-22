@@ -19,7 +19,6 @@ export class ContractService {
   buildRegisterOAuthServiceTx(params: {
     clientId: string
     redirectUrl: string
-    resourceTypes: number[]
   }): Transaction {
     const tx = new Transaction()
     tx.moveCall({
@@ -27,7 +26,6 @@ export class ContractService {
       arguments: [
         tx.pure.string(params.clientId),
         tx.pure.string(params.redirectUrl),
-        tx.pure.vector('u8', params.resourceTypes),
         tx.object('0x6'), // Clock
       ],
     })
@@ -113,9 +111,7 @@ export class ContractService {
     vaultCapId: string
     vaultId: string
     name: string
-    shareType: number // 0: View, 1: Edit, 2: Delete
     walrusBlobId: string
-    nonce: Uint8Array
   }): Transaction {
     const tx = new Transaction()
     tx.moveCall({
@@ -124,9 +120,7 @@ export class ContractService {
         tx.object(params.vaultCapId),
         tx.object(params.vaultId),
         tx.pure.string(params.name),
-        tx.pure.u8(params.shareType),
         tx.pure.string(params.walrusBlobId),
-        tx.pure.vector('u8', Array.from(params.nonce)),
       ],
     })
     return tx
@@ -137,22 +131,18 @@ export class ContractService {
    */
   buildUpdateDataEntryTx(params: {
     vaultCapId: string
-    dataId: string
-    name: string
-    shareType: number
-    walrusBlobId: string
-    nonce: Uint8Array
+    vaultId: string
+    itemId: string
+    newBlobId: string
   }): Transaction {
     const tx = new Transaction()
     tx.moveCall({
       target: `${this.packageId}::seal_private_data::update_data_entry`,
       arguments: [
         tx.object(params.vaultCapId),
-        tx.object(params.dataId),
-        tx.pure.string(params.name),
-        tx.pure.u8(params.shareType),
-        tx.pure.string(params.walrusBlobId),
-        tx.pure.vector('u8', Array.from(params.nonce)),
+        tx.object(params.vaultId),
+        tx.object(params.itemId),
+        tx.pure.string(params.newBlobId),
       ],
     })
     return tx
@@ -163,14 +153,36 @@ export class ContractService {
    */
   buildDeleteDataEntryTx(params: {
     vaultCapId: string
-    dataId: string
+    vaultId: string
+    itemId: string
   }): Transaction {
     const tx = new Transaction()
     tx.moveCall({
       target: `${this.packageId}::seal_private_data::delete_data_entry`,
       arguments: [
         tx.object(params.vaultCapId),
-        tx.object(params.dataId),
+        tx.object(params.vaultId),
+        tx.object(params.itemId),
+      ],
+    })
+    return tx
+  }
+
+  /**
+   * Delete a DataVault
+   * Requires the vault to be empty (no items)
+   * Deletes the DataVaultCap, making the vault inaccessible
+   */
+  buildDeleteDataVaultTx(params: {
+    vaultCapId: string
+    vaultId: string
+  }): Transaction {
+    const tx = new Transaction()
+    tx.moveCall({
+      target: `${this.packageId}::seal_private_data::delete_data_vault_entry`,
+      arguments: [
+        tx.object(params.vaultCapId),
+        tx.object(params.vaultId),
       ],
     })
     return tx
@@ -183,6 +195,7 @@ export class ContractService {
     vaultCapId: string
     vaultId: string
     accessAddress: string
+    allowType: number
     expiresAt: number
   }): Transaction {
     const tx = new Transaction()
@@ -192,6 +205,7 @@ export class ContractService {
         tx.object(params.vaultCapId),
         tx.object(params.vaultId),
         tx.pure.address(params.accessAddress),
+        tx.pure.u8(params.allowType),
         tx.pure.u64(params.expiresAt),
         tx.object('0x6'), // Clock
       ],
@@ -387,6 +401,79 @@ export class ContractService {
   }
 
   /**
+   * Get allow list information for a DataVault
+   * Reference: seal_private_data.move::get_allow_list_info
+   * Returns the list of addresses with their access types and expiration times
+   */
+  async getDataVaultAllowListInfo(
+    client: SuiClient,
+    vaultId: string
+  ): Promise<Array<{
+    address: string
+    allowType: number  // 0: View, 1: Edit
+    expiresAt: number  // Expiration timestamp in milliseconds
+  }> | null> {
+    try {
+      const object = await client.getObject({
+        id: vaultId,
+        options: {
+          showContent: true,
+          showType: true,
+        },
+      })
+
+      if (object.data?.content && 'fields' in object.data.content) {
+        const fields = object.data.content.fields as any
+        const allowAccessTo = fields.allow_access_to || []
+        
+        console.log('allow_access_to raw:', JSON.stringify(allowAccessTo, null, 2))
+        console.log('First entry structure:', allowAccessTo[0])
+        
+        // Convert the array of AccessEntry objects to a typed array
+        // AccessEntry may be stored in different formats:
+        // 1. Direct struct: { address, allow_type, expires_at }
+        // 2. With fields: { fields: { address, allow_type, expires_at } }
+        // 3. With type only: { type: '...' } - need to check actual structure
+        return allowAccessTo.map((entry: any, index: number) => {
+          console.log(`Entry ${index}:`, entry)
+          
+          // Try different ways to access the fields
+          let address = ''
+          let allowType = 0
+          let expiresAt = 0
+          
+          // Check if entry has fields property (nested structure)
+          if (entry.fields) {
+            address = entry.fields.address || ''
+            allowType = entry.fields.allow_type || entry.fields.allowType || 0
+            expiresAt = Number(entry.fields.expires_at || entry.fields.expiresAt || 0)
+          } 
+          // Check if fields are directly on entry
+          else if (entry.address !== undefined) {
+            address = entry.address || ''
+            allowType = entry.allow_type || entry.allowType || 0
+            expiresAt = Number(entry.expires_at || entry.expiresAt || 0)
+          }
+          // If entry only has type, log warning
+          else if (entry.type) {
+            console.warn(`Entry ${index} only has type field, cannot extract AccessEntry data:`, entry)
+          }
+          
+          return {
+            address,
+            allowType,
+            expiresAt,
+          }
+        }).filter(entry => entry.address !== '') // Filter out invalid entries
+      }
+      return null
+    } catch (error) {
+      console.error('Error fetching DataVault allow list:', error)
+      return null
+    }
+  }
+
+  /**
    * Get Data item information
    */
   async getDataInfo(
@@ -423,6 +510,54 @@ export class ContractService {
       return null
     } catch (error) {
       console.error('Error fetching Data:', error)
+      return null
+    }
+  }
+
+  /**
+   * Get allow list information for a Data item
+   * Reference: seal_private_data.move::Data struct has allow_access_to field
+   * Returns the list of addresses with their access types and expiration times
+   */
+  async getDataAllowListInfo(
+    client: SuiClient,
+    dataId: string
+  ): Promise<Array<{
+    address: string
+    allowType: number  // 0: View, 1: Edit
+    expiresAt: number  // Expiration timestamp in milliseconds
+  }> | null> {
+    try {
+      const object = await client.getObject({
+        id: dataId,
+        options: {
+          showContent: true,
+          showType: true,
+        },
+      })
+
+      if (object.data?.content && 'fields' in object.data.content) {
+        const fields = object.data.content.fields as any
+        const allowAccessTo = fields.allow_access_to || []
+        
+        console.log('Data allow_access_to raw:', allowAccessTo)
+        
+        // Convert the array of AccessEntry objects to a typed array
+        // AccessEntry may be stored as objects with fields property or directly as structs
+        return allowAccessTo.map((entry: any) => {
+          // Check if entry has fields (nested structure)
+          const entryFields = entry.fields || entry
+          
+          return {
+            address: entryFields.address || '',
+            allowType: entryFields.allow_type || entryFields.allowType || 0,
+            expiresAt: Number(entryFields.expires_at || entryFields.expiresAt || 0),
+          }
+        })
+      }
+      return null
+    } catch (error) {
+      console.error('Error fetching Data allow list:', error)
       return null
     }
   }
@@ -579,6 +714,7 @@ export class ContractService {
 
   /**
    * Extract object IDs from transaction result
+   * Supports both objectChanges and effects.changedObjects
    */
   extractObjectIds(
     result: any,
@@ -587,6 +723,7 @@ export class ContractService {
     const created: string[] = []
     const mutated: string[] = []
 
+    // Method 1: Try objectChanges first (if available)
     if (result.objectChanges) {
       for (const change of result.objectChanges) {
         if (
@@ -599,6 +736,23 @@ export class ContractService {
           change.objectType?.includes(objectType)
         ) {
           mutated.push(change.objectId)
+        }
+      }
+    }
+    // Method 2: Fallback to effects.changedObjects (when objectChanges is undefined)
+    else if (result.effects?.changedObjects) {
+      for (const change of result.effects.changedObjects) {
+        const objType = change.objectType || ''
+        if (
+          change.idOperation === 'Created' &&
+          objType.includes(objectType)
+        ) {
+          created.push(change.id || change.objectId)
+        } else if (
+          change.idOperation === 'Mutated' &&
+          objType.includes(objectType)
+        ) {
+          mutated.push(change.id || change.objectId)
         }
       }
     }

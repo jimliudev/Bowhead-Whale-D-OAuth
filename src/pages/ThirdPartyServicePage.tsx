@@ -25,7 +25,6 @@ export default function ThirdPartyServicePage() {
   // 表单状态
   const [clientId, setClientId] = useState('')
   const [redirectUrl, setRedirectUrl] = useState('')
-  const [resourceTypes, setResourceTypes] = useState<number[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('')
@@ -36,8 +35,8 @@ export default function ThirdPartyServicePage() {
     objectId: string
     clientId: string
     redirectUrl: string
-    resourceTypes: number[]
     createdAt: number
+    serviceId: string
   } | null>(null)
   const [loadingService, setLoadingService] = useState(false)
 
@@ -50,60 +49,47 @@ export default function ThirdPartyServicePage() {
     }
   }, [])
 
-  // 检查用户是否已注册服务
-  useEffect(() => {
-    const fetchRegisteredService = async () => {
-      if (!isConnected || !currentAccount) {
-        setRegisteredService(null)
-        return
-      }
-
-      setLoadingService(true)
-      try {
-        const services = await contractService.getOAuthSerViceViaServiceCaps(
-          suiClient,
-          currentAccount.address
-        )
-
-        if (services.length > 0) {
-          // 使用第一个服务（通常用户只有一个服务）
-          const service = services[0]
-          setRegisteredService({
-            objectId: service.objectId,
-            clientId: service.fields.client_id,
-            redirectUrl: service.fields.redirect_url,
-            resourceTypes: service.fields.resource_types || [],
-            createdAt: service.fields.created_at || 0,
-          })
-          setServiceId(service.objectId)
-        } else {
-          setRegisteredService(null)
-        }
-      } catch (err) {
-        console.error('Error fetching registered service:', err)
-        setRegisteredService(null)
-      } finally {
-        setLoadingService(false)
-      }
+  const fetchRegisteredService = async () => {
+    if (!isConnected || !currentAccount) {
+      setRegisteredService(null)
+      return
     }
 
+    setLoadingService(true)
+    try {
+      const services = await contractService.getOAuthSerViceViaServiceCaps(
+        suiClient,
+        currentAccount.address
+      )
+
+      if (services.length > 0) {
+        // 使用第一个服务（通常用户只有一个服务）
+        const service = services[0]
+        setRegisteredService({
+          objectId: service.objectId,
+          clientId: service.fields.client_id,
+          redirectUrl: service.fields.redirect_url,
+          createdAt: service.fields.created_at || 0,
+          serviceId: currentAccount.address
+        })
+        setServiceId(service.objectId)
+      } else {
+        setRegisteredService(null)
+      }
+    } catch (err) {
+      console.error('Error fetching registered service:', err)
+      setRegisteredService(null)
+    } finally {
+      setLoadingService(false)
+    }
+  }
+
+
+  // 检查用户是否已注册服务
+  useEffect(() => {
     fetchRegisteredService()
   }, [isConnected, currentAccount, suiClient])
 
-  // Resource type options
-  const resourceTypeOptions = [
-    { value: 0, label: 'View' },
-    { value: 1, label: 'Edit' },
-    { value: 2, label: 'Delete' },
-  ]
-
-  const handleResourceTypeChange = (value: number, checked: boolean) => {
-    if (checked) {
-      setResourceTypes([...resourceTypes, value])
-    } else {
-      setResourceTypes(resourceTypes.filter(t => t !== value))
-    }
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -120,11 +106,6 @@ export default function ThirdPartyServicePage() {
 
     if (!redirectUrl.trim()) {
       setError('Please enter Redirect URL')
-      return
-    }
-
-    if (resourceTypes.length === 0) {
-      setError('Please select at least one resource type')
       return
     }
 
@@ -145,14 +126,12 @@ export default function ThirdPartyServicePage() {
       const tx = contractService.buildRegisterOAuthServiceTx({
         clientId: clientId.trim(),
         redirectUrl: redirectUrl.trim(),
-        resourceTypes,
       })
 
       setStatus('Signing and executing transaction...')
       console.log('Transaction parameters:', {
         clientId: clientId.trim(),
         redirectUrl: redirectUrl.trim(),
-        resourceTypes,
       })
 
       const result = await signAndExecuteTransaction({
@@ -175,8 +154,8 @@ export default function ThirdPartyServicePage() {
           objectId: serviceIdValue,
           clientId: clientId.trim(),
           redirectUrl: redirectUrl.trim(),
-          resourceTypes,
           createdAt: Date.now(),
+          serviceId: currentAccount.address
         })
       } else {
         setStatus(`✅ Service registered successfully!\nTransaction: ${result.digest}\nView on: https://suiexplorer.com/txblock/${result.digest}?network=testnet`)
@@ -186,7 +165,7 @@ export default function ThirdPartyServicePage() {
       // Clear form
       setClientId('')
       setRedirectUrl('')
-      setResourceTypes([])
+      fetchRegisteredService()
     } catch (err: any) {
       const errorMsg = err?.message || err?.toString() || 'Registration failed'
       setError(`Registration failed: ${errorMsg}`)
@@ -217,7 +196,6 @@ export default function ThirdPartyServicePage() {
               <ul>
                 <li><strong>Client ID</strong>: Your unique service identifier</li>
                 <li><strong>Redirect URL</strong>: OAuth authorization redirect address</li>
-                <li><strong>Resource Types</strong>: Select the resource permission types your service can access</li>
                 <li>After successful registration, you will receive a <code>ServiceCap</code> for managing your service</li>
               </ul>
             </div>
@@ -268,29 +246,6 @@ export default function ThirdPartyServicePage() {
                     <p style={{ fontSize: '0.9375rem', wordBreak: 'break-all' }}>{registeredService.redirectUrl}</p>
                   </div>
                   
-                  <div style={{ marginBottom: '1rem' }}>
-                    <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
-                      <strong>Resource Types:</strong>
-                    </p>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {registeredService.resourceTypes.map((type) => (
-                        <span
-                          key={type}
-                          style={{
-                            padding: '0.25rem 0.75rem',
-                            background: '#e8f5e9',
-                            color: '#2e7d32',
-                            borderRadius: '4px',
-                            fontSize: '0.875rem',
-                            fontWeight: 500,
-                          }}
-                        >
-                          {resourceTypeOptions.find(opt => opt.value === type)?.label || `Type ${type}`}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  
                   <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #bbf7d0' }}>
                     <p style={{ marginBottom: '0.75rem', fontSize: '0.9375rem', fontWeight: 500 }}>
                       OAuth Authorization Link:
@@ -311,12 +266,12 @@ export default function ThirdPartyServicePage() {
                         wordBreak: 'break-all',
                         fontSize: '0.8125rem',
                       }}>
-                        {window.location.origin}/bowheadwhale/doauth_page?service={registeredService.objectId}
+                        {window.location.origin}/bowheadwhale/doauth_page?service={registeredService.serviceId}
                       </code>
                       <button
                         className="btn btn-secondary"
                         onClick={() => {
-                          const link = `${window.location.origin}/bowheadwhale/doauth_page?service=${registeredService.objectId}`
+                          const link = `${window.location.origin}/bowheadwhale/doauth_page?service=${registeredService.serviceId}`
                           navigator.clipboard.writeText(link)
                           alert('Authorization link copied to clipboard!')
                         }}
@@ -339,7 +294,6 @@ export default function ThirdPartyServicePage() {
               <ul>
                 <li><strong>Client ID</strong>: Your unique service identifier</li>
                 <li><strong>Redirect URL</strong>: OAuth authorization redirect address</li>
-                <li><strong>Resource Types</strong>: Select the resource permission types your service can access</li>
                 <li>After successful registration, you will receive a <code>ServiceCap</code> for managing your service</li>
               </ul>
             </div>
@@ -348,7 +302,7 @@ export default function ThirdPartyServicePage() {
               <div className="form-group">
                 <label htmlFor="clientId">
                   <strong>Client ID *</strong>
-                  <span className="form-hint">(Unique service identifier)</span>
+                  <span className="form-hint">(Service Name or ID)</span>
                 </label>
                 <input
                   type="text"
@@ -377,29 +331,9 @@ export default function ThirdPartyServicePage() {
                 />
               </div>
 
-              <div className="form-group">
-                <label>
-                  <strong>Resource Types *</strong>
-                  <span className="form-hint">(Select resource permissions for your service)</span>
-                </label>
-                <div className="checkbox-group">
-                  {resourceTypeOptions.map((option) => (
-                    <label key={option.value} className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={resourceTypes.includes(option.value)}
-                        onChange={(e) => handleResourceTypeChange(option.value, e.target.checked)}
-                        disabled={loading}
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
               <button
                 type="submit"
-                disabled={loading || !clientId.trim() || !redirectUrl.trim() || resourceTypes.length === 0}
+                disabled={loading || !clientId.trim() || !redirectUrl.trim()}
                 className="btn btn-primary"
                 style={{ width: '100%', marginTop: '1rem' }}
               >
