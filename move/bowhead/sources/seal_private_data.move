@@ -7,21 +7,19 @@ use sui::tx_context::{Self, TxContext};
 use std::string::String;
 
 use bowhead::utils::is_prefix;
-use bowhead::oauth_service::{OAuthService, OAuthGrant, ThirdPartyOauthCap};
+use bowhead::oauth_service::{ OAuthService };
 use std::bool;
 
 // === Errors ===
 const ENotOwner: u64 = 0;
 const ENoAccess: u64 = 1;
+const EVaultNotEmpty: u64 = 2;
 const EShareExpired: u64 = 4;
+const EEditCapExpired: u64 = 5;
+const EEditCapMismatch: u64 = 6;
+const ENoEditPermission: u64 = 7;
 
 // === Structs ===
-
-/// Access entry with expiration time for allow list
-public struct AccessEntry has store, copy, drop {
-    address: address,
-    expires_at: u64,  // Expiration timestamp in milliseconds
-}
 
 /// Data vault for storing general data (images, videos, text)
 public struct DataVault has key {
@@ -38,24 +36,31 @@ public struct Data has key {
     id: UID,
     vault_id: ID,
     name: String,  // File name
-    share_type: u8,  // 0: View, 1: Edit, 2: Delete
     value: String,  // Walrus blob ID
-    nonce: vector<u8>,  // Nonce for Seal ID generation
+    allow_access_to: vector<AccessEntry>,
 }
 
-/// Capability token for managing a data vault
+/// Capability token for managing a data vault for owner only.
 public struct DataVaultCap has key {
     id: UID,
     vault_id: ID,
 }
 
-/// Read-only capability token for viewing a data vault
-/// Has an expiration time, after which it becomes invalid
-public struct ReadOnlyCap has key {
-    id: UID,
-    vault_id: ID,
+/// Access entry with expiration time for allow list
+public struct AccessEntry has store, copy, drop {
+    address: address,
+    allow_type: u8,  // 0: View, 1: Edit,
     expires_at: u64,  // Expiration timestamp in milliseconds
 }
+
+/// Capability token for editing a data vault
+public struct EditVaultDataCap has key {
+    id: UID,
+    vault_id: ID,
+    data_id: ID,
+    expires_at: u64,  // Expiration timestamp in milliseconds
+}
+
 
 // === Events ===
 
@@ -80,6 +85,11 @@ public struct DataUpdated has copy, drop {
 public struct DataDeleted has copy, drop {
     item_id: ID,
     vault_id: ID,
+}
+
+public struct DataVaultDeleted has copy, drop {
+    vault_id: ID,
+    owner: address,
 }
 
 // === Functions ===
@@ -116,31 +126,12 @@ public fun get_data_vault_info(vault: &DataVault): (ID, address, String, u64) {
 }
 
 
-/// Create a read-only capability for a vault
-/// Only the vault owner can create this
-fun create_readonly_cap(
-    vault: &DataVault,
-    expires_at: u64,
-    clock: &Clock,
-    ctx: &mut TxContext
-): ReadOnlyCap {
-    // Ensure expiration time is in the future
-    assert!(expires_at > clock::timestamp_ms(clock), EShareExpired);
-    ReadOnlyCap {
-        id: object::new(ctx),
-        vault_id: object::id(vault),
-        expires_at,
-    }
-}
-
 /// Create a data item
 fun create_data(
     cap: &DataVaultCap,
     vault: &mut DataVault,
     name: String,
-    share_type: u8,
     value: String,  // Walrus blob ID
-    nonce: vector<u8>,
     ctx: &mut TxContext
 ): Data {
     assert!(cap.vault_id == object::id(vault), ENotOwner);
@@ -150,19 +141,17 @@ fun create_data(
         id: object::new(ctx),
         vault_id: object::id(vault),
         name,
-        share_type,
         value,
-        nonce,
+        allow_access_to: vector::empty<AccessEntry>(),
     };
 
     vault.items.push_back(object::id(&item));
     item
 }
 
-public fun get_data_info(data: &Data): (String, u8, String) {
+public fun get_data_info(data: &Data): (String, String) {
     (
         data.name,
-        data.share_type,
         data.value
     )
 }
@@ -173,7 +162,6 @@ fun update_data(
     vault: &DataVault,
     item: &mut Data,
     new_value: String,  // New Walrus blob ID
-    new_nonce: vector<u8>,
     ctx: &TxContext
 ) {
     assert!(cap.vault_id == object::id(vault), ENotOwner);
@@ -181,7 +169,6 @@ fun update_data(
     assert!(item.vault_id == object::id(vault), ENotOwner);
 
     item.value = new_value;
-    item.nonce = new_nonce;
 }
 
 /// Delete a data item
@@ -209,6 +196,27 @@ fun delete_data(
     object::delete(id);
 }
 
+/// Delete a data vault
+/// Requires:
+/// 1. Valid DataVaultCap matching the vault
+/// 2. Caller must be the vault owner
+/// 3. Vault must be empty (no items)
+/// Note: Since DataVault is a shared object, it cannot be deleted.
+/// This function deletes the DataVaultCap, effectively making the vault inaccessible.
+fun delete_data_vault(
+    cap: DataVaultCap,
+    vault: &DataVault,
+    ctx: &TxContext
+) {
+    assert!(cap.vault_id == object::id(vault), ENotOwner);
+    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
+    // Require vault to be empty before deletion
+    assert!(vector::length(&vault.items) == 0, EVaultNotEmpty);
+
+    let DataVaultCap { id, .. } = cap;
+    object::delete(id);
+}
+
 /// Add addresses to the allow list of a data vault with expiration time
 /// Only the vault owner can modify the allow list
 /// If address already exists, update its expiration time
@@ -217,6 +225,7 @@ public entry fun add_to_allow_list(
     cap: &DataVaultCap,
     vault: &mut DataVault,
     access_address: address,
+    allow_type: u8,
     expires_at: u64,
     clock: &Clock,
     ctx: &TxContext
@@ -247,6 +256,7 @@ public entry fun add_to_allow_list(
     if (!found) {
         let new_entry = AccessEntry {
             address: access_address,
+            allow_type: allow_type,
             expires_at,
         };
         vector::push_back(&mut vault.allow_access_to, new_entry);
@@ -273,32 +283,15 @@ public entry fun create_data_vault_entry(
     transfer::transfer(cap, owner);
 }
 
-/// Entry function to create a read-only capability
-/// Only the vault owner can create this
-/// expires_at: Expiration timestamp in milliseconds
-public entry fun create_readonly_cap_entry(
-    vault: &DataVault,
-    expires_at: u64,
-    clock: &Clock,
-    service_address: address,
-    ctx: &mut TxContext
-) {
-    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
-    let readonly_cap = create_readonly_cap(vault, expires_at, clock, ctx);
-    transfer::transfer(readonly_cap, service_address);
-}
-
 /// Entry function to create a data item
 public entry fun create_data_entry(
     cap: &DataVaultCap,
     vault: &mut DataVault,
     name: String,
-    share_type: u8,
     value: String,  // Walrus blob ID
-    nonce: vector<u8>,
     ctx: &mut TxContext
 ) {
-    let item = create_data(cap, vault, name, share_type, value, nonce, ctx);
+    let item = create_data(cap, vault, name, value, ctx);
 
     // event::emit(DataCreated {
     //     item_id: object::id(&item),
@@ -316,10 +309,9 @@ public entry fun update_data_entry(
     vault: &DataVault,
     item: &mut Data,
     new_value: String,  // New Walrus blob ID
-    new_nonce: vector<u8>,
     ctx: &TxContext
 ) {
-    update_data(cap, vault, item, new_value, new_nonce, ctx);
+    update_data(cap, vault, item, new_value, ctx);
 
     // event::emit(DataUpdated {
     //     item_id: object::id(item),
@@ -344,6 +336,78 @@ public entry fun delete_data_entry(
     // });
 }
 
+/// Entry function to delete a data vault
+/// Requires the vault to be empty (no items)
+/// Deletes the DataVaultCap, making the vault inaccessible
+public entry fun delete_data_vault_entry(
+    cap: DataVaultCap,
+    vault: &DataVault,
+    ctx: &TxContext
+) {
+    let vault_id = object::id(vault);
+    let owner = vault.owner;
+    delete_data_vault(cap, vault, ctx);
+
+    // event::emit(DataVaultDeleted {
+    //     vault_id,
+    //     owner,
+    // });
+}
+
+/// Update a data item's value using EditVaultDataCap
+/// Only third-party services with valid EditVaultDataCap and whitelist permission can call this
+/// 
+/// Security checks:
+/// 1. EditVaultDataCap must not be expired
+/// 2. EditVaultDataCap's data_id must match the data item
+/// 3. Caller (tx_context::sender) must be in Data's allow_access_to whitelist
+/// 4. Whitelist entry must have Edit permission (allow_type == 1)
+/// 5. Whitelist entry must not be expired
+public entry fun update_data_by_third_party(
+    edit_cap: &EditVaultDataCap,
+    item: &mut Data,
+    new_value: String,  // New Walrus blob ID
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    let caller = tx_context::sender(ctx);
+    let current_time = clock::timestamp_ms(clock);
+    
+    // Check if EditVaultDataCap has expired
+    assert!(edit_cap.expires_at >= current_time, EEditCapExpired);
+    
+    // Check if EditVaultDataCap's data_id matches the data item
+    assert!(edit_cap.data_id == object::id(item), EEditCapMismatch);
+    
+    // Check if caller is in Data's allow_access_to whitelist with Edit permission
+    let mut found = false;
+    let mut i = 0;
+    let allow_list_len = vector::length(&item.allow_access_to);
+    while (i < allow_list_len) {
+        let entry = vector::borrow(&item.allow_access_to, i);
+        if (entry.address == caller) {
+            // Check if entry has Edit permission (allow_type == 1)
+            assert!(entry.allow_type == 1, ENoEditPermission);
+            // Check if entry hasn't expired
+            assert!(current_time <= entry.expires_at, EShareExpired);
+            found = true;
+            break
+        };
+        i = i + 1;
+    };
+    
+    // Ensure caller is in whitelist
+    assert!(found, ENoAccess);
+    
+    // Update the value
+    item.value = new_value;
+    
+    // event::emit(DataUpdated {
+    //     item_id: object::id(item),
+    //     vault_id: item.vault_id,
+    // });
+}
+
 /// Entry function to add addresses to the allow list of a data vault
 /// Only the vault owner can modify the allow list
 /// expires_at: Expiration timestamp in milliseconds (must be in the future)
@@ -351,41 +415,16 @@ public entry fun create_data_vault_allow_list(
     cap: &DataVaultCap,
     vault: &mut DataVault,
     access_address: address,
+    allow_type: u8,
     expires_at: u64,
     clock: &Clock,
     ctx: &TxContext
 ) {
-    add_to_allow_list(cap, vault, access_address, expires_at, clock, ctx);
+    add_to_allow_list(cap, vault, access_address, allow_type, expires_at, clock, ctx);
 }
 
 // === Seal Access Control ===
 
-/// Check policy for owner access
-/// Seal ID format: [vault_id_bytes][nonce]
-/// Only the owner can decrypt their data
-fun check_owner_policy(
-    id: vector<u8>,
-    vault: &DataVault,
-    item: &Data,
-    caller: address
-): bool {
-    // Only owner can access
-    if (vault.owner != caller) {
-        return false
-    };
-
-    // Check vault ID matches
-    if (object::id(vault) != item.vault_id) {
-        return false
-    };
-
-    // Build expected namespace: vault_id + nonce
-    let mut namespace = object::id(vault).to_bytes();
-    namespace.append(item.nonce);
-
-    // Check if id starts with namespace
-    is_prefix(namespace, id)
-}
 
 /// Check policy for read-only access
 /// Seal ID format: [vault_id_bytes][nonce]
@@ -398,14 +437,15 @@ fun check_readonly_policy(
     clock: &Clock,
     ctx: &TxContext
 ): bool {
-    // Check vault ID matches
-    if (object::id(vault) != item.vault_id) {
-        return false
-    };
-
+    // Only owner's sessionKey can access the data vault
     let caller = tx_context::sender(ctx);
 
     if (caller != vault.owner) {
+        return false
+    };
+
+    // Check vault ID matches
+    if (object::id(vault) != item.vault_id) {
         return false
     };
 
@@ -501,91 +541,6 @@ public entry fun seal_approve(
     assert!(check_readonly_policy(vault, item, access_address, clock, ctx), ENoAccess);
 }
 
-/// Check policy for OAuth access
-/// Verifies that the service is registered and has authorization
-/// Also checks that the service has ThirdPartyOauthCap permission
-fun check_oauth_policy(
-    id: vector<u8>,
-    vault: &DataVault,
-    item: &Data,
-    service: &OAuthService,
-    grant: &OAuthGrant,
-    oauth_cap: &ThirdPartyOauthCap,
-    clock: &Clock,
-    caller: address
-): bool {
-    use bowhead::oauth_service::{
-        get_service_owner,
-        get_service_client_id,
-        get_grant_client_id,
-        get_grant_expires_at,
-        get_grant_resource_ids,
-        get_oauth_cap_service_id,
-    };
-
-    // Check service is registered and caller is service owner
-    if (get_service_owner(service) != caller) {
-        return false
-    };
-
-    // Check ThirdPartyOauthCap is valid for this service
-    if (get_oauth_cap_service_id(oauth_cap) != object::id(service)) {
-        return false
-    };
-
-    // Check grant is valid
-    if (get_grant_client_id(grant) != get_service_client_id(service)) {
-        return false
-    };
-
-    // Check grant hasn't expired
-    if (clock::timestamp_ms(clock) > get_grant_expires_at(grant)) {
-        return false
-    };
-
-    // Check resource is in authorized list
-    let resource_ids = get_grant_resource_ids(grant);
-    let mut found = false;
-    let mut i = 0;
-    while (i < vector::length(&resource_ids)) {
-        if (*vector::borrow(&resource_ids, i) == object::id(item)) {
-            found = true;
-            break
-        };
-        i = i + 1;
-    };
-    if (!found) {
-        return false
-    };
-
-    // Check vault ID matches
-    if (object::id(vault) != item.vault_id) {
-        return false
-    };
-
-    // Build expected namespace: vault_id + nonce
-    let mut namespace = object::id(vault).to_bytes();
-    namespace.append(item.nonce);
-
-    // Check if id starts with namespace
-    is_prefix(namespace, id)
-}
-
-/// Seal approve function for OAuth access
-/// Allows registered services to decrypt authorized resources
-/// Requires ThirdPartyOauthCap to verify service has permission
-public entry fun seal_approve_oauth(
-    id: vector<u8>,
-    vault: &DataVault,
-    item: &Data,
-    service: &OAuthService,
-    grant: &OAuthGrant,
-    oauth_cap: &ThirdPartyOauthCap,
-    clock: &Clock,
-    ctx: &TxContext
-) {
-    assert!(check_oauth_policy(id, vault, item, service, grant, oauth_cap, clock, tx_context::sender(ctx)), ENoAccess);
-}
 
 // === View Functions ===
 
@@ -601,42 +556,6 @@ public fun get_vault_info(vault: &DataVault): (ID, address, String, u64, vector<
     )
 }
 
-/// Get vault information with read-only cap
-/// Checks if the cap has expired
-public fun get_vault_info_readonly(
-    readonly_cap: &ReadOnlyCap,
-    vault: &DataVault,
-    clock: &Clock
-): (ID, address, String, u64, vector<ID>) {
-    assert!(readonly_cap.vault_id == object::id(vault), ENoAccess);
-    // Check if cap has expired
-    assert!(clock::timestamp_ms(clock) <= readonly_cap.expires_at, EShareExpired);
-    get_vault_info(vault)
-}
-
-/// Get data item information
-public fun get_item_info(item: &Data): (ID, ID, String, u8, String) {
-    (
-        object::id(item),
-        item.vault_id,
-        item.name,
-        item.share_type,
-        item.value,
-    )
-}
-
-/// Get data item information with read-only cap
-/// Checks if the cap has expired
-public fun get_item_info_readonly(
-    readonly_cap: &ReadOnlyCap,
-    item: &Data,
-    clock: &Clock
-): (ID, ID, String, u8, String) {
-    assert!(readonly_cap.vault_id == item.vault_id, ENoAccess);
-    // Check if cap has expired
-    assert!(clock::timestamp_ms(clock) <= readonly_cap.expires_at, EShareExpired);
-    get_item_info(item)
-}
 
 /// Get allow list information
 /// Returns vector of addresses and their expiration times
@@ -650,4 +569,3 @@ public fun get_allow_list_info(
     assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
     vault.allow_access_to
 }
-

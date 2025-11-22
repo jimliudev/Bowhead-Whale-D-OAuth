@@ -1,300 +1,168 @@
-# Bowhead Whale Move Contract
+# Bowhead Whale - D OAuth
 
-This Move contract provides storage and access control for encrypted data stored on Walrus.
+> 去中心化 OAuth 基礎建設，基於 Sui Move 智能合約、Walrus Blob 存儲和 Seal 加密協議
 
-## Architecture
+## 📋 項目簡介
 
-### Modules
+Bowhead Whale (簡稱 D OAuth) 是一個**去中心化的 OAuth 基礎建設**，為 Web3 生態系統提供安全、去中心化的用戶數據管理和授權機制。通過結合 **Walrus Blob 存儲**和 **Seal 加密協議**，實現了完全去中心化的用戶數據管理與第三方服務授權流程。
 
-1. **`storage.move`** - Core storage module
-   - `StorageContainer`: Stores encrypted data references (Walrus blob IDs)
-   - `StorageCap`: Capability token for managing containers
-   - `Namespace`: Manages Seal ID namespace for encryption/decryption
-   - Functions: Create, update, delete storage containers
-   - Seal access control via `seal_approve`
+## 🎯 核心痛點與解決方案
 
-2. **`share.move`** - Sharing module
-   - `Share`: Temporary access grants to encrypted data
-   - `ShareCap`: Capability token for managing shares
-   - Functions: Create, update, delete shares
-   - Time-based access control (TTL)
-   - Seal access control for shared data
+### 痛點問題
 
-3. **`utils.move`** - Utility functions
-   - `is_prefix`: Helper for Seal ID namespace validation
+#### 1. **傳統 OAuth 的中心化依賴**
+- ❌ 傳統 OAuth 2.0 依賴中心化授權服務器
+- ❌ 單點故障風險，服務中斷影響所有依賴服務
+- ❌ 用戶數據由中心化服務商控制，缺乏自主權
 
-## Workflow
+#### 2. **用戶數據管理分散且不安全**
+- ❌ 用戶數據（圖片、影片、文字、密碼）分散在多個平台
+- ❌ 缺乏統一的加密存儲解決方案
+- ❌ 密碼管理工具與數據存儲分離，使用體驗割裂
 
-### Creating and Storing Encrypted Data
+#### 3. **第三方服務獲取用戶數據的信任問題**
+- ❌ 第三方服務需要用戶直接提供敏感數據
+- ❌ 缺乏細粒度的授權控制（讀取、編輯、刪除權限）
+- ❌ 無法追蹤和撤銷已授權的訪問
 
-1. **Encrypt data with Seal** (client-side)
-   - Generate Seal ID: `[container_id][nonce]`
-   - Encrypt data using Seal SDK
-   - Upload encrypted data to Walrus → get `blob_id`
+#### 4. **新用戶註冊流程複雜**
+- ❌ 用戶首次使用第三方服務需要手動註冊
+- ❌ 無法自動化密碼管理和同步
 
-2. **Create storage container** (on-chain)
-   ```move
-   storage::create_storage_entry(name, blob_id, ctx)
-   ```
-   - Creates `StorageContainer` with blob reference
-   - Creates `StorageCap` for management
-   - Creates `Namespace` with nonce for Seal ID
+### 解決方案
 
-### Decrypting Data
+#### ✅ **去中心化 OAuth 機制**
+- 基於 Sui Move 智能合約實現完全去中心化的授權流程
+- 無需中心化服務器，降低單點故障風險
+- 用戶通過錢包簽名完成授權，完全自主控制
 
-1. **Read storage container** (on-chain)
-   - Get `blob_id` from `StorageContainer`
-   - Get `nonce` from `Namespace`
+#### ✅ **統一數據管理 + 端到端加密**
+- 整合 Walrus Blob 存儲（去中心化存儲）和 Seal 加密協議
+- 用戶數據（圖片、影片、文字、密碼）統一管理
+- 所有數據在客戶端加密後存儲，只有授權方可以解密
 
-2. **Build Seal ID**
-   - Seal ID = `[container_id_bytes][nonce]`
+#### ✅ **細粒度授權控制**
+- 支持 View、Edit、Delete 三種權限級別
+- 基於時間的訪問控制（AccessEntry with expiration）
+- 鏈上記錄所有授權關係，可追蹤可撤銷
 
-3. **Build seal_approve transaction bytes** (don't execute)
-   ```move
-   storage::seal_approve(seal_id, container, namespace, ctx)
-   ```
+#### ✅ **自動化密碼管理**
+- 首次登入第三方服務時自動創建密碼
+- 支持 Common 密碼機制，一次設定多服務使用
+- 無縫整合到 OAuth 流程中
 
-4. **Decrypt with Seal SDK** (client-side)
-   - Pass transaction bytes to Seal Key Server
-   - Seal Key Server validates access policy
-   - Returns decryption key if valid
-   - Client decrypts data
+## 🛠 技術架構
 
-### Sharing Data
+### 核心技術棧
 
-1. **Create share**
-   ```move
-   share::create_share_entry(container, namespace, recipients, ttl, ctx)
-   ```
+- **Sui Move 智能合約** - 去中心化授權邏輯與數據結構管理
+- **Walrus Blob 存儲** - 去中心化數據存儲基礎設施
+- **Seal 加密協議** - 端到端加密與訪問策略控制
+- **錢包簽名認證** - 用戶身份驗證與授權簽名
 
-2. **Recipients decrypt**
-   - Build Seal ID using container namespace
-   - Build `share::seal_approve` transaction bytes
-   - Seal Key Server validates:
-     - Recipient is in recipients list
-     - Share hasn't expired (TTL check)
-     - Seal ID matches namespace
+### 技術實現要點
 
-## Seal Access Control
+1. **鏈上授權管理**
+   - `OAuthService` - 第三方服務註冊與白名單管理
+   - `OAuthGrant` - 用戶授權記錄（包含資源類型和時效）
+   - `check_policy` - 驗證服務是否在白名單內
 
-### Storage Container Access
-- `seal_approve` checks:
-  - Caller owns the container, OR
-  - Seal ID matches namespace policy: `[container_id][nonce]`
+2. **數據結構設計**
+   - `DataVault` - 通用數據保險庫（圖片、影片、文字）
+   - `KeyVault` - 密碼保險庫
+   - `AccessEntry` - 帶時效的訪問控制條目
 
-### Share Access
-- `seal_approve` checks:
-  - Caller is in recipients list
-  - Share hasn't expired (current_time < created_at + ttl)
-  - Seal ID matches container namespace
+3. **Seal 加密集成**
+   - 數據加密後存儲 Walrus Blob ID
+   - 通過 `seal_approve` 方法實現細粒度訪問控制
+   - 只有授權的第三方服務可以解密對應資源
 
-## Building and Testing
+## 🚀 核心功能
 
-```bash
-# Build
-sui move build
+### 功能一：用戶數據管理
 
-# Test
-sui move test
+#### Feature 1: 通用數據管理
+- 透過 Walrus 新增、刪除、修改數據（圖片、影片、文字）
+- 支持分組管理（Group Name）
+- 細粒度權限控制（View/Edit/Delete）
 
-# Publish (after setting up addresses)
-sui client publish --gas-budget 100000000
+#### Feature 2: 密碼管理
+- 透過 Walrus 新增、刪除、修改密碼
+- 支持網站密碼、銀行密碼等各類密碼管理
+- 自動化密碼同步與驗證
+
+### 功能二：D OAuth 授權機制
+
+#### Feature 1: 服務註冊
+- 第三方服務註冊並獲得 `clientId`
+- 選擇可請求的資源類型
+- 錢包私鑰認證服務身份
+
+#### Feature 2: OAuth 授權流程
+- 用戶通過錢包簽名授權第三方服務
+- 可選擇性授權特定資源類型
+- 支持時間限制的訪問授權
+
+#### Feature 3: 新用戶自動註冊
+- 首次登入第三方服務時自動創建密碼
+- 無縫整合到 OAuth 流程
+- 自動同步到 Bowhead Whale 管理界面
+
+#### Feature 4: 已有用戶快速登入
+- 支持 Common 密碼機制
+- 一次設定，多服務使用
+- 自動驗證用戶輸入
+
+## 📊 工作流程
+
+### Path 1: 服務方註冊
+```
+廠商 → Bowhead Whale 介面 → 註冊服務
+     → 輸入服務名稱、描述、Redirect URL
+     → 獲得 clientId
+     → 記錄到 DOAuth_Service_AllowList
 ```
 
-## Integration with Frontend
-
-See `src/lib/construct-move-call.ts` for TypeScript functions to build Move transactions.
-
-sui keytool import suiprivkey1qr8ex8v60jq4h43ad8xr38v8z6tetkce4czdsk5wsr0a2mzl3g0qzr3ta2r ed25519
-
-sui client switch --address 0x1e73c640d345028a6fe7c656a1a094d5c2d292e1818487d456177bae1daaf32f
-
-
-sui client call \
---package 0x41b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c74 \
---module seal_private_data \
---function create_data_entry \
---args 0x2e6e700277e63f861619405ecba860535efcba3a45be01b23a42c1323528f22f 0x9268c62a439a270552b462059eeb79332320d16ca34f287530aa1a05c364a9db Email 0 test@gmail.com 0
-
-
-create_readonly_cap_entry
-
-sui client call \
---package 0x41b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c74 \
---module seal_private_data \
---function create_readonly_cap_entry \
---args 0xd25766a545d94444aa5d6ec9e83efd2884919f6b24b59226576c92ba4e9dbb65 1058165238189000 0x6 0x1e73c640d345028a6fe7c656a1a094d5c2d292e1818487d456177bae1daaf32f
-
-
-1300 成功 - User1 DataVault User1 SessionId
-
-packageid :
-0xcf402055c5e349e9baf41004c328e4bf851842a3714ea362d9844d8ced972676
-
-User1 DataVaultCap:
-0x2e6e700277e63f861619405ecba860535efcba3a45be01b23a42c1323528f22f
-
-User1 DataVault:
-0x9268c62a439a270552b462059eeb79332320d16ca34f287530aa1a05c364a9db
-
-User1 ReadCap :
-0x18dfdccedb1ca4a29cb91e6ce77f6c43e011bc2ffb04e4cde825a97a6f1ac9cc
-
-User1 Data Object : 
-0x4375833d80f4748320f722340bc7679baa60a97dec903f7f03cd602c74368d83
-
-- User1 DataVault Owner SessionId
-
-Owner ReadCap :
-0x8dde58e5f2bcb1574e44b0509945718f256dfea88ba50d80bfe5025a287ae8b3
-
-加密訊息：
-00cf402055c5e349e9baf41004c328e4bf851842a3714ea362d9844d8ced97267627424f57484541445748414c452d442d4f415554485f4143434553532d444154412d504f4c4943590273d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db7501f5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8020200adf9467ba92767bb791108883e84ffdac389c6f652b5ef7abf378a0cb20cf1ffeb0abf6fc07bcdcfb6ededb4e4a5037717bc53ca340f0647145395a88e508572e73b06e23facd1d126efcc23afbbc308aaebb01c38a093a3bc93e39fc398a639021359d3eb52eac23a131faa0b44a705cfc587eeeb8e7177b3f9830bdd3250a03c729496031a93b8c0bbd21189f993685ab6928001ce3186a9095fd14dc69afb33b5301a7b185c6af8fc176f10f119a1f19511518faee46e8376b6fcac11ffeb00002cd22f0c7bb6a355fface211fa14a38d76bf6af18baa2d1645b943df461f5e7a3d475be5a840ba0bc98f94bb520100
-
-seal id:
-424f57484541445748414c452d442d4f415554485f4143434553532d444154412d504f4c494359
-
-{
-  "address": "0x1e73c640d345028a6fe7c656a1a094d5c2d292e1818487d456177bae1daaf32f",
-  "packageId": "0xcf402055c5e349e9baf41004c328e4bf851842a3714ea362d9844d8ced972676",
-  "timestamp": 1763452628960
-}
-
-
-share object.
-packageid = 0x41b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c74
-
-User1 DataVaultCap:
-0x6961d211e82d1d406c53de10be20c0759d2563f219d044e430a1b00c66bb38df
-
-User1 DataVault:
-0xd25766a545d94444aa5d6ec9e83efd2884919f6b24b59226576c92ba4e9dbb65
-
-User1 ReadCap :
-0xab38440c72c903975b9d6167e3273c5491474b1497163e829e18ea09a3f4228a
-
-
-User1 Data Object : 
-0x713b43eac604fa074107b8826967dbf585bc9a869295b14b41b5026b236e5ddc
-
-
-- User1 DataVault Owner SessionId
-
-Owner ReadCap :
-0x6296bbcaf4e7facd4f7fbb7e9284072d34f7b7180729d4b5f2c6994d2a66b5f9
-
-{
-  "address": "0x1e73c640d345028a6fe7c656a1a094d5c2d292e1818487d456177bae1daaf32f",
-  "packageId": "0x41b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c74",
-  "creationTimeMs": 1763637940340,
-  "ttlMin": 10,
-  "sessionKey": "suiprivkey1qzn3nh9lu8g8awkautlx8m4txxpuhe5xlg28mffjh8el3h7gng4zy9pvk35",
-  "personalMessageSignature": "AKPjsy7+hou/hwlbluvdg5hoB9lWkgrutxZoIudrXMiLz3rXYSFKIsGaoUYhyqNiipOo4fGRWGNPZOcI3guU8wrsvUWb+k8vHCEvSmTCH/nCPS3463TnxmGIDqAqFes0uQ=="
-}
-
-加密訊息：
-0041b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c7427424f57484541445748414c452d442d4f415554485f4143434553532d444154412d504f4c4943590273d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db7501f5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c802020092273e346c20c11329bc34d743a74116e11c01cc01fe1857f68908c65766fab449636a9ff5258d04b292fa8d6405a89b0f6ca74c3aad57c031219b62b1a25e854fe573755a329ebae7f632da63d6d53cbea9bd7518e762ad9e0a136e2bc152e202e41a1632154d3304b703ce7930eedcda3fc052ccf615746e75048284f6281f2dff5da38b68218bd06dc1b686c900c242d8453d5a7a1e3091dbfe97a0523a06312dccda1ee57d1a666dc4352023d0fbdcb657d55a5f9386f3cb06a75c8fa20f96002ff1fa2743375964cb2592e0a74bca76f464d906942541759f3316f7c5394bb36509b15e5182a38daef9771dfe4ddcb30100
-
-
-
-
-加密訊息：
-0041b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c7427424f57484541445748414c452d442d4f415554485f4143434553532d444154412d504f4c4943590273d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db7501f5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8020200a815bd4ac570b0a2c7d92266153a95eb3ca5018db21524cf4270da3f5655cead908e02409acfa77ad28bfff8d40c1fc00fca63bd8f5a7c9793a35635b9383ac11fa6c3ee208a5de7c199dd62b993a7f6cba7d280808e55b1fab197385b06a5e002c326cfd8dc1229e62bc43246ebf4090a3ade6a124bcc42f360a9211b6ac3362e7850e7887a7ebdccb0bd9b9d37c1ae0e2ed3c1c9f12e10c7c0181046ec63947b42a7082eb95be11fd7d6d2e4bf71cec56a951fa865faf56b9cdee4db00f5a0bd00143211ec6ae93122872346d9e7809d91e1885913190100
-
-
-{
-  "address": "0x1e73c640d345028a6fe7c656a1a094d5c2d292e1818487d456177bae1daaf32f",
-  "packageId": "0x41b85c5f88a0ff61e6e97a570e538cfb44d3856a43ae281cedd1e402a50f4c74",
-  "timestamp": 1763456156013
-}
-
-
-walrus
-ovD7zkp0waCSpK2SQwItrxY3DUxrxbVBGKpyF0a29Ko
-
-share object.
-packageid :
-0x1b8c6bc174e8d735de214ffb4ffa71a3d014d0e8a370efce339ef5b0323b6229
-
-User1 DataVaultCap :
-0x4a8575b96cff4b5532268b1c71e491f07b5705a7d9e61409ae26f1606a668c76
-
-User1 DataVault :
-0xf3662358c9e85f5c48904e555566daae2293d353189830a484a1d717a3150651
-
-User1 ReadCap :
-
-
-User1 Data Object : 
-0x71f0067edd6bf8bc6d1512adf9c09b213dc0ab8378c627e50ea492190303286c
-
-- User1 DataVault Owner SessionId
-
-Owner ReadCap :
-
-
-
-001b8c6bc174e8d735de214ffb4ffa71a3d014d0e8a370efce339ef5b0323b622927424f57484541445748414c452d442d4f415554485f4143434553532d444154412d504f4c4943590273d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db7501f5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c80202009677ea51957f7e92da478ec97d6c70f070ef9d434f73a4664c2718cce525cb9e432171e4104c8df2262b82e91881c6c10eabdb44e562fe7885d227b348c7a0c6ba0193372871a3ea88edbf28c60bbe15ec3a95ab7a4172d65b7829e08e4a72f802899ecfbeef5076b77805bb4960c54c2f145bb1b13f096bbda76feba1c3adaabaa63e3b85cba1400f8a64b19669c6d7507d6aefee155ed976eb8b67a04163996df2e4b149eb923ddeae422bf2ac152209e61d94c79d7feb9ee8ec6d3e372fe2b7003423ddbf2b3a661d69329c0765c9a52d1b210b92717f57a12c811ae00dfe52dc17ea273944f97b5bb1842da5b1aac2218e54f77b5a0100
-
-
-{
-  "address": "0x1e73c640d345028a6fe7c656a1a094d5c2d292e1818487d456177bae1daaf32f",
-  "packageId": "0x1b8c6bc174e8d735de214ffb4ffa71a3d014d0e8a370efce339ef5b0323b6229",
-  "creationTimeMs": 1763691499647,
-  "ttlMin": 10,
-  "sessionKey": "suiprivkey1qqeh72msk4720r6d0ha9t52gj2jhqgca0n6lhzm5s64aqxlsgxv6cszwjmg",
-  "personalMessageSignature": "APY0UzesbgmcAIjmVuo/CYDPSjbsiuum6C5tcMx0PAGG69gEKIj97FoOFoqvCoTiTw5FWK4OhqX5voywDZewVwLsvUWb+k8vHCEvSmTCH/nCPS3463TnxmGIDqAqFes0uQ=="
-}
-
-
-share object.
-packageid :
-0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3
-
-User1 DataVaultCap :
-0xb400f52b07325424f55301dcd275c253f23ca79acb387c3caa8732edf63faba5
-
-
-User1 DataVault :
-0xc4a7e4bca913ace080db6bb60513beaaa65b1ae1fe1509de6fbc49ff07466e7a
-
-
-User1 Data Object : 
-0x422d2389a167444551c1a1dfc77023e28b8113bfb67dd583fa373d2186732afc
-
-
-sui client call \
---package 0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3 \
---module seal_private_data \
---function create_data_vault_entry \
---args Basic
-
-sui client call \
---package 0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3 \
---module seal_private_data \
---function create_data_entry \
---args 0xb400f52b07325424f55301dcd275c253f23ca79acb387c3caa8732edf63faba5 0xc4a7e4bca913ace080db6bb60513beaaa65b1ae1fe1509de6fbc49ff07466e7a Email 0 test@gmail.com 0
-
-
-sui client call \
---package 0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3 \
---module seal_private_data \
---function add_to_allow_list \
---args 0xb400f52b07325424f55301dcd275c253f23ca79acb387c3caa8732edf63faba5 0xc4a7e4bca913ace080db6bb60513beaaa65b1ae1fe1509de6fbc49ff07466e7a 0x3f58a419f88a0b054daebff43c2a759a7a390a6f749cfc991793134cf6a89e21 1058219222437200 0x6
-
-
-TODO:
-servcie 
-1. default input -> basic info field. ohoh there are button, but it isn't good design.
-
-feature
-✅ service read
-❌ service write
-✅ user create text
-❌ user read text (讀不回來)
-❌ user basic info
-❌ user read text don't need sign twice
-❌ doc教學文章頁面。how to connect this service.
-❌ 授權頁面UI優化
-
-https://localhost:5174/call-back?access_token=ewogICJhZGRyZXNzIjogIjB4MWU3M2M2NDBkMzQ1MDI4YTZmZTdjNjU2YTFhMDk0ZDVjMmQyOTJlMTgxODQ4N2Q0NTYxNzdiYWUxZGFhZjMyZiIsCiAgInBhY2thZ2VJZCI6ICIweDAxMTU0YjkwMjU1MGYyNGFlMDkwMTUzYWU2ZmJhZTA1NjAwY2Y1ZWU3YzhhMTZjZmY5NWFiM2UwNjRiZjEzZTMiLAogICJjcmVhdGlvblRpbWVNcyI6IDE3NjM3MzQ0MDU3MTUsCiAgInR0bE1pbiI6IDEwLAogICJzZXNzaW9uS2V5IjogInN1aXByaXZrZXkxcXB6cWRxNzRqN2ZtbG1uNWRnMGFzdWg1M3loZnp3bnE2OTNrcHQzNWQwdWVkdmtmeDd1cnZxY2pwdWMiLAogICJwZXJzb25hbE1lc3NhZ2VTaWduYXR1cmUiOiAiQUVHc1E3SmVCczBDb2VMUG5WMnhyZUZNUzZwMHR6a3kwSTZQdG1SUUhVVFcyZXBSbVJtU2J4REtWcWRuOEVsQXYyeWo1S09iQ3ppVWh4Ull4T2VJRWd2c3ZVV2Irazh2SENFdlNtVENIL25DUFMzNDYzVG54bUdJRHFBcUZlczB1UT09Igp9
+### Path 2: 用戶 D OAuth 登入
+```
+用戶 → 第三方服務登入按鈕
+     → 跳轉 Bowhead Whale OAuth 頁面
+     → 錢包簽名授權
+     → 合約驗證服務是否在白名單
+     → 創建/更新 Auth_List
+     → 返回 access_token
+```
+
+### Path 3: 服務方獲取用戶資源
+```
+服務方 → HTTP GET Bowhead Whale API
+       → 提供 access_token
+       → 合約執行 seal_approve
+       → check_policy 驗證授權
+       → 返回加密資源 URL
+       → 服務方使用 secret_key 解密
+```
+
+## 🔐 安全特性
+
+- ✅ **端到端加密** - 所有數據使用 Seal 協議加密
+- ✅ **鏈上授權驗證** - 所有授權記錄在鏈上，不可篡改
+- ✅ **時間限制訪問** - 支持訪問時效控制
+- ✅ **細粒度權限** - View/Edit/Delete 三級權限控制
+- ✅ **白名單機制** - 只有註冊服務可以請求授權
+
+## 📁 合約結構
+
+- `seal_private_data.move` - 數據保險庫與 Seal 加密集成
+- `oauth_service.move` - OAuth 服務註冊與授權管理
+- `utils.move` - 工具函數
+
+## 🔗 相關資源
+
+- [Walrus 文檔](https://github.com/MystenLabs/awesome-walrus)
+- [Seal 文檔](https://seal-docs.wal.app/)
+- [Sui Move 文檔](https://docs.sui.io/build/move)
+
+---
+
+**Bowhead Whale** - 讓 Web3 用戶數據管理更安全、更自主、更便捷

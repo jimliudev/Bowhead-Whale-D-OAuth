@@ -42,7 +42,8 @@ export default function DOAuthPage() {
 
   const [serviceInfo, setServiceInfo] = useState<any>(null)
   const [userDataItems, setUserDataItems] = useState<any[]>([])
-  const [selectedResources, setSelectedResources] = useState<string[]>([])
+  // selectedResources: Record<resourceId, permissionType> where 0=View, 1=Edit
+  const [selectedResources, setSelectedResources] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('')
@@ -161,12 +162,18 @@ export default function DOAuthPage() {
     2: 'Delete',
   }
 
-  const handleResourceToggle = (resourceId: string) => {
+  const handleResourceToggle = (resourceId: string, permissionType: number) => {
     setSelectedResources((prev) => {
-      const newSelection = prev.includes(resourceId)
-        ? prev.filter((id) => id !== resourceId)
-        : [...prev, resourceId]
-      console.log('Selected resources:', newSelection)
+      // If already selected with the same permission, deselect it
+      if (prev[resourceId] === permissionType) {
+        const newSelection = { ...prev }
+        delete newSelection[resourceId]
+        console.log('Deselected resource:', resourceId)
+        return newSelection
+      }
+      // Otherwise, set the permission type
+      const newSelection = { ...prev, [resourceId]: permissionType }
+      console.log('Selected resource:', resourceId, 'with permission:', permissionType === 0 ? 'View' : 'Edit')
       return newSelection
     })
   }
@@ -186,7 +193,7 @@ export default function DOAuthPage() {
       return
     }
 
-    if (selectedResources.length === 0) {
+    if (Object.keys(selectedResources).length === 0) {
       setError('Please select at least one resource to authorize')
       return
     }
@@ -204,7 +211,7 @@ export default function DOAuthPage() {
 
       // Get unique vault IDs from selected resources
       const selectedItems = userDataItems.filter((item) =>
-        selectedResources.includes(item.id)
+        selectedResources.hasOwnProperty(item.id)
       )
       const uniqueVaultIds = [
         ...new Set(selectedItems.map((item) => item.vaultId).filter(Boolean)),
@@ -259,20 +266,6 @@ export default function DOAuthPage() {
           ],
         })
       }
-
-      // Step 2: Create OAuth grant
-      const resourceIds = selectedResources
-      tx.moveCall({
-        target: `${SEAL_PACKAGE_ID}::oauth_service::create_oauth_grant_entry`,
-        arguments: [
-          tx.pure.string(serviceInfo.clientId),
-          tx.pure.address(currentAccount.address),
-          tx.pure.vector('address', resourceIds),
-          tx.pure.u64(expiresAt),
-          tx.pure.string(accessToken),
-          tx.object('0x6'), // Clock
-        ],
-      })
 
       setStatus('Signing and executing transaction...')
       const result = await signAndExecuteTransaction({
@@ -450,7 +443,7 @@ export default function DOAuthPage() {
                   <>
                     <h1 className="oauth-title">Bowhead Whale Authorization</h1>
                     <p className="oauth-subtitle">
-                      {serviceInfo.clientId} is requesting permission to access your data
+                      <strong style={{ color: '#0071e3', fontWeight: 600 }}>{serviceInfo.clientId}</strong> is requesting permission to access your data
                     </p>
                   </>
                 ) : error ? (
@@ -519,22 +512,6 @@ export default function DOAuthPage() {
           ) : (
             <>
               <div className="oauth-content">
-                {serviceInfo && serviceInfo.resourceTypes && (
-                  <div className="oauth-permissions">
-                    <h2 className="permissions-title">This will allow {serviceInfo.clientId} to:</h2>
-                    <ul className="permissions-list">
-                      {serviceInfo.resourceTypes.map((type: number, index: number) => (
-                        <li key={index} className="permission-item">
-                          <svg className="permission-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
-                            <path d="M16.6667 5L7.50004 14.1667L3.33337 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                          </svg>
-                          <span>{resourceTypeLabels[type] || `Type ${type}`} your data</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
                 <div className="oauth-resources">
                   <h3 className="resources-title">
                     Select Resources to Authorize {userDataItems.length > 0 && `(${userDataItems.length})`}
@@ -546,15 +523,14 @@ export default function DOAuthPage() {
                   ) : userDataItems.length > 0 ? (
                     <div className="resources-list">
                       {userDataItems.map((item) => {
+                        const isSelected = selectedResources.hasOwnProperty(item.id)
+                        const selectedPermission = selectedResources[item.id] ?? null
                         return (
-                          <div key={item.id} className="resource-item-container">
-                            <label className="resource-checkbox">
-                              <input
-                                type="checkbox"
-                                checked={selectedResources.includes(item.id)}
-                                onChange={() => handleResourceToggle(item.id)}
-                                disabled={loading}
-                              />
+                          <div 
+                            key={item.id} 
+                            className={`resource-item-container ${isSelected ? 'resource-item-selected' : ''}`}
+                          >
+                            <div className="resource-checkbox-wrapper">
                               <div className="resource-info">
                                 <div className="resource-main">
                                   <span className="resource-label">{item.name || 'Unnamed'}</span>
@@ -569,30 +545,39 @@ export default function DOAuthPage() {
                                   <span className="resource-detail-item">
                                     <strong>Vault:</strong> {item.vaultId ? `${item.vaultId.slice(0, 8)}...${item.vaultId.slice(-6)}` : 'N/A'}
                                   </span>
-                                  <span className="resource-detail-item">
-                                    <strong>Walrus Blob:</strong> {item.value || 'N/A'}
-                                  </span>
                                 </div>
                               </div>
-                            </label>
-                            <button
-                              className="resource-details-button"
-                              onClick={() => {
-                                console.log('📋 Full Data Item Details:', {
-                                  id: item.id,
-                                  name: item.name,
-                                  shareType: item.shareType,
-                                  shareTypeLabel: resourceTypeLabels[item.shareType],
-                                  vaultId: item.vaultId,
-                                  walrusBlobId: item.value,
-                                  nonce: item.nonce,
-                                })
-                                alert(`Data Item: ${item.name}\n\nID: ${item.id}\nVault ID: ${item.vaultId}\nWalrus Blob ID: ${item.value}\nShare Type: ${resourceTypeLabels[item.shareType]}\n\n详细信息已输出到控制台`)
-                              }}
-                              title="View full details"
-                            >
-                              ℹ️
-                            </button>
+                              <div className="resource-permission-selector">
+                                <div className="permission-options">
+                                  <button
+                                    type="button"
+                                    className={`permission-option ${selectedPermission === 0 ? 'permission-option-active' : ''}`}
+                                    onClick={() => handleResourceToggle(item.id, 0)}
+                                    disabled={loading}
+                                    title="View only"
+                                  >
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                      <path d="M8 2.667C4.667 2.667 2 5.333 2 8.667s2.667 6 6 6 6-2.667 6-6-2.667-6-6-6zm0 10.667c-2.573 0-4.667-2.094-4.667-4.667S5.427 4 8 4s4.667 2.094 4.667 4.667S10.573 13.333 8 13.333z" fill="currentColor"/>
+                                      <path d="M8 6c-1.467 0-2.667 1.2-2.667 2.667h1.333c0-.733.6-1.333 1.333-1.333s1.333.6 1.333 1.333H10.667C10.667 7.2 9.467 6 8 6z" fill="currentColor"/>
+                                    </svg>
+                                    <span>View</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`permission-option ${selectedPermission === 1 ? 'permission-option-active' : ''}`}
+                                    onClick={() => handleResourceToggle(item.id, 1)}
+                                    disabled={loading}
+                                    title="Edit"
+                                  >
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                      <path d="M11.333 2.667c.733 0 1.334.6 1.334 1.333v8c0 .733-.6 1.333-1.334 1.333H4.667c-.733 0-1.334-.6-1.334-1.333V4c0-.733.6-1.333 1.334-1.333h2V2H4.667C3.194 2 2 3.194 2 4.667v6.666C2 12.806 3.194 14 4.667 14h6.666C12.806 14 14 12.806 14 11.333V4.667C14 3.194 12.806 2 11.333 2z" fill="currentColor"/>
+                                      <path d="M10.667 2.667L6 7.333v2.667h2.667l4.667-4.667V2.667h-2.667z" fill="currentColor"/>
+                                    </svg>
+                                    <span>Edit</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         )
                       })}
@@ -619,7 +604,7 @@ export default function DOAuthPage() {
                       console.log('Authorize button clicked', {
                         loading,
                         serviceInfo: !!serviceInfo,
-                        selectedResources: selectedResources.length,
+                        selectedResources: Object.keys(selectedResources).length,
                         selectedResourcesList: selectedResources,
                       })
                       handleAuthorize()
@@ -627,12 +612,12 @@ export default function DOAuthPage() {
                     disabled={
                       loading ||
                       !serviceInfo ||
-                      selectedResources.length === 0
+                      Object.keys(selectedResources).length === 0
                     }
                     title={
                       !serviceInfo
                         ? 'Service info not loaded'
-                        : selectedResources.length === 0
+                        : Object.keys(selectedResources).length === 0
                         ? 'Please select at least one resource'
                         : 'Click to authorize'
                     }

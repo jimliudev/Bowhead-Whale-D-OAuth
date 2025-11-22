@@ -16,9 +16,10 @@ interface HeaderProps {
     to: string
     label: string
   }
+  onAccountClick?: () => void
 }
 
-export default function Header({ title, backTo = '/', backLabel = 'Back', rightLink }: HeaderProps) {
+export default function Header({ title, backTo = '/', backLabel = 'Back', rightLink, onAccountClick }: HeaderProps) {
   const location = useLocation()
   const currentAccount = useCurrentAccount()
   const { currentWallet } = useCurrentWallet()
@@ -154,6 +155,25 @@ export default function Header({ title, backTo = '/', backLabel = 'Back', rightL
                       <path d="M6 12L10 8L6 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </Link>
+                  {onAccountClick && (
+                    <button
+                      className="settings-link"
+                      onClick={() => {
+                        setShowSettings(false)
+                        onAccountClick()
+                      }}
+                      style={{
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <span>Account</span>
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M6 12L10 8L6 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
 

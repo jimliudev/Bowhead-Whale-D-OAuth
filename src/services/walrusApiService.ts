@@ -25,6 +25,7 @@ export interface UploadToWalrusParams {
 
 export interface UploadToWalrusResult {
   blobId: string
+  blobObjectId: string | null  // Sui Object ID for deletion
   blobObject: any
   size: number
   epochs: number
@@ -124,6 +125,39 @@ export class WalrusApiService {
     } catch (error) {
       console.error('Walrus read error:', error)
       throw error instanceof Error ? error : new Error('Failed to read from Walrus')
+    }
+  }
+
+  /**
+   * Delete blob from Walrus via API
+   * @param blobId Blob ID to delete
+   * @returns Delete result
+   */
+  async deleteBlob(blobId: string): Promise<void> {
+    if (!blobId) {
+      throw new Error('Blob ID is required')
+    }
+
+    try {
+      // Call API to delete from Walrus
+      const apiBaseUrl = getApiBaseUrl()
+      const response = await fetch(`${apiBaseUrl}/api/walrus/delete/${blobId}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || `Failed to delete blob from Walrus: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+
+      if (!result.success) {
+        throw new Error(result.error || 'Delete failed')
+      }
+    } catch (error) {
+      console.error('Walrus delete error:', error)
+      throw error instanceof Error ? error : new Error('Failed to delete blob from Walrus')
     }
   }
 }

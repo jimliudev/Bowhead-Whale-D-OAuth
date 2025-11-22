@@ -10,6 +10,7 @@ import { SessionKey, SealClient } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromHex } from '@mysten/sui/utils';
 import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
+import { getFundedKeypair } from '../../src/funded-keypair.ts';
 
 
 dotenv.config();
@@ -126,11 +127,19 @@ app.post('/api/walrus/upload', async (req, res) => {
 
     // If we have blobId, return success (even if there were confirmation errors)
     if (blobId) {
+      // Extract blobObjectId from blobObject if available
+      let blobObjectId = null;
+      if (blobObject) {
+        // blobObject is a Sui object, extract its ID
+        blobObjectId = blobObject.id?.id || blobObject.objectId || null;
+      }
+
       res.json({
         success: true,
         message: 'Data uploaded to Walrus successfully',
         data: {
           blobId,
+          blobObjectId, // Add blobObjectId for deletion support
           blobObject: blobObject || null,
           size: blobData.length,
           epochs,
@@ -496,6 +505,136 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
     });
   }
 });
+
+// Delete blob from Walrus
+// This endpoint accepts blobId OR blobObjectId
+// If blobId is provided, we need to query blobObjectId first
+app.delete('/api/walrus/delete/:identifier', async (req, res) => {
+  try {
+    const { identifier } = req.params;
+    
+    if (!identifier) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing identifier parameter (blobId or blobObjectId)',
+      });
+    }
+
+    console.log(`🗑️ Deleting blob from Walrus: ${identifier}`);
+
+    // Get keypair (needed for delete operation)
+    const keypair = getKeypair();
+
+    // Check if identifier is a Sui Object ID (starts with 0x and is 64 hex chars)
+    const isSuiObjectId = /^0x[a-fA-F0-9]{64}$/.test(identifier);
+    
+    let blobObjectId = identifier; // Assume it's blobObjectId if it matches Sui Object ID format
+    
+    if (!isSuiObjectId) {
+      // It's a blobId (Walrus hash format), we cannot directly delete using blobId
+      // We need blobObjectId (Sui Object ID) to delete
+      // Unfortunately, there's no direct API to query blobObjectId from blobId
+      // The blobObjectId should have been stored when the blob was created
+      
+      console.error(`❌ Invalid identifier format. Received blobId (${identifier}), but need blobObjectId (Sui Object ID)`);
+      
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid identifier format: blobId provided, but blobObjectId (Sui Object ID) is required for deletion.',
+        details: {
+          received: identifier,
+          receivedType: 'blobId (Walrus hash)',
+          expectedType: 'blobObjectId (Sui Object ID)',
+          expectedFormat: '0x followed by 64 hexadecimal characters',
+          explanation: 'Walrus deletion requires the Sui Object ID of the blob, not the blob hash ID. The blobObjectId should be stored when the blob is created.',
+          solution: {
+            immediate: 'For new uploads, store blobObjectId from the upload response (data.blobObjectId)',
+            existing: 'For existing data, you may need to re-upload or implement a mapping between blobId and blobObjectId',
+          },
+        },
+      });
+    }
+
+    try {
+      // Use executeDeleteBlobTransaction with blobObjectId
+      const result = await suiClient.walrus.executeDeleteBlobTransaction({
+        blobObjectId: blobObjectId,
+        signer: keypair,
+      });
+
+      console.log(`✅ Blob deleted successfully: ${blobObjectId}`);
+
+      res.json({
+        success: true,
+        message: 'Blob deleted successfully',
+        data: {
+          blobObjectId,
+          digest: result.digest,
+        },
+      });
+    } catch (deleteError) {
+      console.error('Delete error:', deleteError);
+      
+      // Handle specific error cases
+      if (deleteError.message?.includes('not found') || deleteError.message?.includes('NotFound') || deleteError.message?.includes('Invalid Sui Object id')) {
+        return res.status(404).json({
+          success: false,
+          error: 'Blob not found: The blobObjectId does not exist or is invalid.',
+          details: {
+            blobObjectId: identifier,
+            suggestion: 'Please verify the blobObjectId is correct. Make sure you are using the Sui Object ID, not the blobId.',
+          },
+        });
+      }
+      
+      if (deleteError.message?.includes('not deletable') || deleteError.message?.includes('deletable')) {
+        return res.status(400).json({
+          success: false,
+          error: 'Blob is not deletable: This blob was uploaded with deletable=false and cannot be deleted before its epochs expire.',
+          details: {
+            blobObjectId: identifier,
+            suggestion: 'Only blobs uploaded with deletable=true can be deleted before their epochs expire.',
+          },
+        });
+      }
+      
+      throw deleteError;
+    }
+  } catch (error) {
+    console.error('❌ Walrus delete error:', error);
+    
+    // Handle specific error cases
+    if (error.message?.includes('not found') || error.message?.includes('NotFound')) {
+      return res.status(404).json({
+        success: false,
+        error: 'Blob not found: The requested blob may not exist or has already been deleted.',
+        details: {
+          blobId: req.params.blobId,
+        },
+      });
+    }
+    
+    if (error.message?.includes('not deletable') || error.message?.includes('deletable')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Blob is not deletable: This blob was uploaded with deletable=false and cannot be deleted before its epochs expire.',
+        details: {
+          blobId: req.params.blobId,
+          suggestion: 'Only blobs uploaded with deletable=true can be deleted before their epochs expire.',
+        },
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to delete blob from Walrus',
+      details: {
+        note: 'If this error persists, it may be because blobId cannot be directly used for deletion. Consider storing blobObjectId when creating blobs.',
+      },
+    });
+  }
+});
+
 
 // Serve static files from React build
 // In Docker: __dirname is /app/src, dist is at /app/dist
