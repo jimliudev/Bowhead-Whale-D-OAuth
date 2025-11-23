@@ -6,14 +6,17 @@ import {
   useSignAndExecuteTransaction,
   useDisconnectWallet,
   ConnectButton,
+  useSignPersonalMessage,
 } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 import { SEAL_PACKAGE_ID } from '../config'
 import { contractService } from '../services/contractService'
 import { SealService } from '../services/sealService'
 import './css/PageLayout.css'
 import './css/DOAuthPage.css'
+import { SessionKey } from '@mysten/seal'
 
 const suiClient = new SuiClient({
   url: getFullnodeUrl('testnet'),
@@ -30,6 +33,9 @@ export default function DOAuthPage() {
   const serviceAddress = searchParams.get('service')
   const isConnected = Boolean(currentAccount)
   const [showSettings, setShowSettings] = useState(false)
+
+  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
+
 
   useEffect(() => {
     // Add class to body to override default styles
@@ -161,19 +167,20 @@ export default function DOAuthPage() {
     1: 'Edit',
     2: 'Delete',
   }
+  
 
-  const handleResourceToggle = (resourceId: string, permissionType: number) => {
+  const handleResourceToggle = (resourceId: string) => {
     setSelectedResources((prev) => {
-      // If already selected with the same permission, deselect it
-      if (prev[resourceId] === permissionType) {
+      // If already selected, deselect it
+      if (prev.hasOwnProperty(resourceId)) {
         const newSelection = { ...prev }
         delete newSelection[resourceId]
         console.log('Deselected resource:', resourceId)
         return newSelection
       }
-      // Otherwise, set the permission type
-      const newSelection = { ...prev, [resourceId]: permissionType }
-      console.log('Selected resource:', resourceId, 'with permission:', permissionType === 0 ? 'View' : 'Edit')
+      // Otherwise, select it with View permission (0)
+      const newSelection = { ...prev, [resourceId]: 0 }
+      console.log('Selected resource:', resourceId, 'with permission: View')
       return newSelection
     })
   }
@@ -203,9 +210,6 @@ export default function DOAuthPage() {
     setStatus('Creating read-only capabilities...')
 
     try {
-      // Generate access token
-      const accessToken = generateAccessToken()
-
       // Calculate expiration (30 mins from now)
       const expiresAt = Date.now() + 30 * 60 * 1000
 
@@ -254,6 +258,9 @@ export default function DOAuthPage() {
           continue
         }
 
+        // All selected items have View permission (0) only
+        const allowType = 0
+
         // Add service owner to allow list
         tx.moveCall({
           target: `${SEAL_PACKAGE_ID}::seal_private_data::create_data_vault_allow_list`,
@@ -261,40 +268,38 @@ export default function DOAuthPage() {
             tx.object(vaultCapId),
             tx.object(vaultId),
             tx.pure.address(serviceOwnerAddress),
+            tx.pure.u8(allowType),
             tx.pure.u64(expiresAt),
             tx.object('0x6'), // Clock
           ],
         })
       }
 
+      // Step 2: Create OAuthGrant to store authorization on-chain
+      setStatus('Creating OAuth grant...')
+      const resourceEntries = selectedItems.map(item => ({
+        dataId: item.id,
+        allowType: selectedResources[item.id] ?? 0,
+      }))
+
+      // Add moveCall to create OAuthGrant
+      tx.moveCall({
+        target: `${SEAL_PACKAGE_ID}::seal_private_data::create_oauth_grant_entry`,
+        arguments: [
+          tx.pure.address(currentAccount.address),
+          tx.pure.vector('address', resourceEntries.map(e => e.dataId)),
+          tx.pure.vector('u8', resourceEntries.map(e => e.allowType)),
+          tx.pure.u64(expiresAt),
+          tx.object('0x6'), // Clock
+        ],
+      })
+
       setStatus('Signing and executing transaction...')
       const result = await signAndExecuteTransaction({
         transaction: tx as any,
       })
 
-      console.log('OAuth grant created:', result)
-
-      // Extract grant ID from result
-      const resultAny = result as any
-      let extractedGrantId: string | null = null
-      if (resultAny.objectChanges) {
-        const grantChange = resultAny.objectChanges.find(
-          (change: any) =>
-            change.type === 'created' && change.objectType?.includes('OAuthGrant')
-        )
-        if (grantChange) {
-          extractedGrantId = grantChange.objectId
-        }
-      }
-
-      console.log('Authorization successful, setting states...', {
-        grantId: extractedGrantId,
-        accessToken: accessToken, // This is the temporary token for grant creation
-      })
-
-      // Save authorization result and show success page
-      // IMPORTANT: Set these states in the correct order to prevent any race conditions
-      setGrantId(extractedGrantId)
+     
       setError(null) // Clear any previous errors
       setStatus('✅ Authorization successful!')
       
@@ -332,13 +337,55 @@ export default function DOAuthPage() {
     try {
       // Use SealService to create and export SessionKey as base64
       setStatus('Please sign in your wallet to create SessionKey...')
-      const sessionKeyBase64 = await sealService.createAndExportSessionKeyAsBase64(
-        currentAccount.address,
-        currentWallet,
-        currentAccount,
+      // const sessionKeyBase64 = await sealService.createAndExportSessionKeyAsBase64(
+      //   currentAccount.address,
+      //   currentWallet,
+      //   currentAccount,
+      //   suiClient,
+      //   10 // ttlMin: 10 minutes
+      // )
+
+      const sessionKey = await SessionKey.create({
+        address: currentAccount.address,
+        packageId: SEAL_PACKAGE_ID,
+        ttlMin: 20,
         suiClient,
-        10 // ttlMin: 10 minutes
-      )
+      })
+
+
+      // Sign personal message
+      const personalMessage = sessionKey.getPersonalMessage()
+      const signature = await signPersonalMessage({ message: personalMessage })
+      await sessionKey.setPersonalMessageSignature(signature.signature)
+
+      console.log('✅ SessionKey signed, exporting...')
+
+      // Export SessionKey to JSON
+      const sessionKeyJson = sealService.serializeSessionKey(sessionKey)
+      console.log('📦 SessionKey JSON exported')
+
+      // Convert JSON to base64
+      const sessionKeyBase64 = btoa(unescape(encodeURIComponent(sessionKeyJson)))
+
+      // test decrypt
+      // const newSessionKey = await SessionKey.create({
+      //   address: currentAccount.address,
+      //   packageId: SEAL_PACKAGE_ID,
+      //   ttlMin: 30,
+      //   suiClient,
+      // })
+
+      // Sign personal message
+      setStatus('Please sign message in your wallet...')
+      // const personalMessage = newSessionKey.getPersonalMessage()
+      // const signature = await signPersonalMessage(personalMessage)
+      // await newSessionKey.setPersonalMessageSignature(signature)
+
+      // const sessionKeyJson = sealService.serializeSessionKey(newSessionKey)
+      console.log('📦 SessionKey JSON exported')
+
+      // Convert JSON to base64
+      // const sessionKeyBase64 = btoa(unescape(encodeURIComponent(sessionKeyJson)))
 
       console.log('✅ SessionKey created and exported as base64')
 
@@ -347,9 +394,6 @@ export default function DOAuthPage() {
       // Redirect to service's redirect URL with base64 encoded SessionKey as access token
       const redirectUrl = new URL(serviceInfo.redirectUrl)
       redirectUrl.searchParams.set('access_token', sessionKeyBase64)
-      if (grantId) {
-        redirectUrl.searchParams.set('grant_id', grantId)
-      }
 
       // Redirect immediately
       window.location.href = redirectUrl.toString()
@@ -369,39 +413,55 @@ export default function DOAuthPage() {
     return (
       <div className="oauth-page">
         <div className="oauth-container">
-          <div className="oauth-card">
-            <div className="oauth-header">
-              <div className="oauth-header-top">
-                <div className="oauth-logo">🐋</div>
-                <div className="oauth-header-text">
-                  <h1 className="oauth-title">✅ Authorization Successful</h1>
-                  <p className="oauth-subtitle">
-                    Your authorization has been completed successfully.
-                  </p>
+          <div className="oauth-card oauth-success-card">
+            <div className="oauth-success-header">
+              <div className="oauth-success-icon-wrapper">
+                <div className="oauth-success-icon">
+                  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="32" fill="#34C759" opacity="0.1"/>
+                    <path d="M32 8C18.745 8 8 18.745 8 32s10.745 24 24 24 24-10.745 24-24S45.255 8 32 8zm0 44c-11.046 0-20-8.954-20-20S20.954 12 32 12s20 8.954 20 20-8.954 20-20 20z" fill="#34C759"/>
+                    <path d="M26 32l6 6 10-10" stroke="#34C759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
                 </div>
               </div>
+              <h1 className="oauth-success-title">Authorization Successful</h1>
+              <p className="oauth-success-subtitle">
+                Your data has been authorized successfully. You can now generate an access token to continue.
+              </p>
             </div>
 
-            <div className="oauth-content">
-              <div className="oauth-success-message">
-                <div className="success-icon">✓</div>
-                <h2>Ready to Generate Access Token</h2>
-                <p>
-                  Click the button below to generate the access token and redirect to the service.
-                </p>
-                
-                {grantId && (
-                  <div className="grant-info">
-                    <p><strong>Grant ID:</strong> {grantId}</p>
-                  </div>
-                )}
+            <div className="oauth-success-content">
+              {grantId && (
+                <div className="oauth-grant-info">
+                  <div className="oauth-grant-label">Grant ID</div>
+                  <div className="oauth-grant-value">{grantId}</div>
+                </div>
+              )}
 
+              <div className="oauth-success-actions">
                 <button
-                  className="oauth-authorize-button"
+                  className="oauth-success-button"
                   onClick={handleGenerateAccessToken}
                   disabled={loading}
                 >
-                  {loading ? 'Processing...' : '产生 accessToken to service'}
+                  {loading ? (
+                    <>
+                      <svg className="oauth-button-spinner" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="31.416" strokeDashoffset="31.416">
+                          <animate attributeName="stroke-dasharray" dur="2s" values="0 31.416;15.708 15.708;0 31.416;0 31.416" repeatCount="indefinite"/>
+                          <animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416;-31.416" repeatCount="indefinite"/>
+                        </circle>
+                      </svg>
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Generate Access Token</span>
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <path d="M7.5 15L12.5 10L7.5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -524,11 +584,12 @@ export default function DOAuthPage() {
                     <div className="resources-list">
                       {userDataItems.map((item) => {
                         const isSelected = selectedResources.hasOwnProperty(item.id)
-                        const selectedPermission = selectedResources[item.id] ?? null
                         return (
                           <div 
                             key={item.id} 
                             className={`resource-item-container ${isSelected ? 'resource-item-selected' : ''}`}
+                            onClick={() => !loading && handleResourceToggle(item.id)}
+                            style={{ cursor: loading ? 'not-allowed' : 'pointer' }}
                           >
                             <div className="resource-checkbox-wrapper">
                               <div className="resource-info">
@@ -549,32 +610,13 @@ export default function DOAuthPage() {
                               </div>
                               <div className="resource-permission-selector">
                                 <div className="permission-options">
-                                  <button
-                                    type="button"
-                                    className={`permission-option ${selectedPermission === 0 ? 'permission-option-active' : ''}`}
-                                    onClick={() => handleResourceToggle(item.id, 0)}
-                                    disabled={loading}
-                                    title="View only"
-                                  >
+                                  <div className={`permission-option ${isSelected ? 'permission-option-active' : ''}`}>
                                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                                       <path d="M8 2.667C4.667 2.667 2 5.333 2 8.667s2.667 6 6 6 6-2.667 6-6-2.667-6-6-6zm0 10.667c-2.573 0-4.667-2.094-4.667-4.667S5.427 4 8 4s4.667 2.094 4.667 4.667S10.573 13.333 8 13.333z" fill="currentColor"/>
                                       <path d="M8 6c-1.467 0-2.667 1.2-2.667 2.667h1.333c0-.733.6-1.333 1.333-1.333s1.333.6 1.333 1.333H10.667C10.667 7.2 9.467 6 8 6z" fill="currentColor"/>
                                     </svg>
                                     <span>View</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`permission-option ${selectedPermission === 1 ? 'permission-option-active' : ''}`}
-                                    onClick={() => handleResourceToggle(item.id, 1)}
-                                    disabled={loading}
-                                    title="Edit"
-                                  >
-                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                      <path d="M11.333 2.667c.733 0 1.334.6 1.334 1.333v8c0 .733-.6 1.333-1.334 1.333H4.667c-.733 0-1.334-.6-1.334-1.333V4c0-.733.6-1.333 1.334-1.333h2V2H4.667C3.194 2 2 3.194 2 4.667v6.666C2 12.806 3.194 14 4.667 14h6.666C12.806 14 14 12.806 14 11.333V4.667C14 3.194 12.806 2 11.333 2z" fill="currentColor"/>
-                                      <path d="M10.667 2.667L6 7.333v2.667h2.667l4.667-4.667V2.667h-2.667z" fill="currentColor"/>
-                                    </svg>
-                                    <span>Edit</span>
-                                  </button>
+                                  </div>
                                 </div>
                               </div>
                             </div>

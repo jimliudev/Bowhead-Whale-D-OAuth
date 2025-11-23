@@ -16,6 +16,7 @@ import Header from '../components/Header'
 import './css/PageLayout.css'
 import './css/UserPage.css'
 
+
 const suiClient = new SuiJsonRpcClient({
 	url: getFullnodeUrl('testnet'),
 	network: 'testnet',
@@ -423,7 +424,9 @@ export default function UserPage() {
         vaultCapId: vault.vaultCapId,
         vaultId: vault.vaultId,
         name: newItemName.trim(),
+        shareType: 0,
         walrusBlobId: blobId,
+        nonce,
       })
 
       const result = await signAndExecuteTransaction({
@@ -523,31 +526,31 @@ export default function UserPage() {
 
       // Check if current user's address is already in the allow list
       setStatus('Checking allow list...')
-      const allowList = await contractService.getDataVaultAllowListInfo(suiClient, vaultId)
-      const currentTime = Date.now()
-      const userInAllowList = allowList?.some(entry => 
-        entry.address === currentAccount.address && 
-        entry.expiresAt > currentTime
-      )
+      // const allowList = await contractService.getDataVaultAllowListInfo(suiClient, vaultId)
+      // const currentTime = Date.now()
+      // const userInAllowList = allowList?.some(entry => 
+      //   entry.address === currentAccount.address && 
+      //   entry.expiresAt > currentTime
+      // )
 
       // Only add to allow list if not already present or expired
-      if (!userInAllowList) {
-        setStatus('Adding address to allow list...')
-        const tx = await contractService.buildCreateDataVaultAllowListTx({
-          vaultCapId: vault.vaultCapId,
-          vaultId: vault.vaultId,
-          accessAddress: currentAccount.address,
-          allowType: 0,
-          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-        })
+      // if (!userInAllowList) {
+      //   setStatus('Adding address to allow list...')
+      //   const tx = await contractService.buildCreateDataVaultAllowListTx({
+      //     vaultCapId: vault.vaultCapId,
+      //     vaultId: vault.vaultId,
+      //     accessAddress: currentAccount.address,
+      //     allowType: 0,
+      //     expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      //   })
 
-        await signAndExecuteTransaction({
-          transaction: tx as any,
-        })
-        console.log('Address added to allow list')
-      } else {
-        console.log('Address already in allow list, skipping add')
-      }
+      //   await signAndExecuteTransaction({
+      //     transaction: tx as any,
+      //   })
+      //   console.log('Address added to allow list')
+      // } else {
+      //   console.log('Address already in allow list, skipping add')
+      // }
       
       setStatus('Creating session key (please sign message)...')
       
@@ -582,7 +585,8 @@ export default function UserPage() {
         sealId,
         vaultId,
         itemId,
-        currentAccount.address
+        currentAccount.address,
+        0,
       )
 
       console.log('Decrypted successfully, size:', decryptedBytes.length)
@@ -1009,24 +1013,24 @@ export default function UserPage() {
       }
 
       // Check allow list and create if needed
-      const allowList = await contractService.getDataVaultAllowListInfo(suiClient, basicVault.vaultId)
-      const currentTime = Date.now()
-      const userInAllowList = allowList?.some(entry => 
-        entry.address === currentAccount.address && 
-        entry.expiresAt > currentTime
-      )
+      // const allowList = await contractService.getDataVaultAllowListInfo(suiClient, basicVault.vaultId)
+      // const currentTime = Date.now()
+      // const userInAllowList = allowList?.some(entry => 
+      //   entry.address === currentAccount.address && 
+      //   entry.expiresAt > currentTime
+      // )
 
-      if (!userInAllowList) {
-        setStatus('Adding address to allow list...')
-        const tx = await contractService.buildCreateDataVaultAllowListTx({
-          vaultCapId: basicVault.vaultCapId,
-          vaultId: basicVault.vaultId,
-          accessAddress: currentAccount.address,
-          allowType: 0,
-          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-        })
-        await signAndExecuteTransaction({ transaction: tx as any })
-      }
+      // if (!userInAllowList) {
+      //   setStatus('Adding address to allow list...')
+      //   const tx = await contractService.buildCreateDataVaultAllowListTx({
+      //     vaultCapId: basicVault.vaultCapId,
+      //     vaultId: basicVault.vaultId,
+      //     accessAddress: currentAccount.address,
+      //     allowType: 0,
+      //     expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      //   })
+      //   await signAndExecuteTransaction({ transaction: tx as any })
+      // }
 
       setStatus('Creating session key...')
       const newSessionKey = await SessionKey.create({
@@ -1048,7 +1052,8 @@ export default function UserPage() {
         sealService.getEncryptionSealId(),
         basicVault.vaultId,
         basicInfoItem.id,
-        currentAccount.address
+        currentAccount.address,
+        0,
       )
 
       // Parse content
@@ -1268,12 +1273,16 @@ export default function UserPage() {
         epochs: 3,
       })
 
+      const nonce = new Uint8Array(16)
+
       // Create Data item with name "Basic Info"
       const itemTx = contractService.buildCreateDataEntryTx({
         vaultCapId,
         vaultId,
         name: 'Basic Info',
+        shareType: 0,
         walrusBlobId: blobId,
+        nonce,
       })
 
       const itemResult = await signAndExecuteTransaction({

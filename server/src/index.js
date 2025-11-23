@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { walrus } from '@mysten/walrus';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
@@ -21,18 +22,23 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// In-memory cache for edit requests (in production, use Redis or similar)
+const editRequestCache = new Map();
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Increase limit for encrypted data
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Seal configuration
-const SEAL_PACKAGE_ID = process.env.SEAL_PACKAGE_ID || '0x01154b902550f24ae090153ae6fbae05600cf5ee7c8a16cff95ab3e064bf13e3';
-const SEAL_PACKAGE_ID_ACCESS_DATA_POLICY = 'BOWHEADWHALE-D-OAUTH_ACCESS-DATA-POLICY';
+const SEAL_PACKAGE_ID = '0xfe7380c2375f03b942da0b3a0eb95eda0aa15b0355f680573dfca333aa80b446';
+const SEAL_PACKAGE_ID_ACCESS_DATA_POLICY = 'BOWHEADWHALE-D-OAUTH_ACCESS-DATA-POLICY_3';
 const SEAL_KEY_SERVER_OBJECT_IDS = [
   '0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75',
   '0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8'
 ];
+
+const clientUrl = 'http://localhost:5173';
 
 // Helper function to convert string to hex
 const stringToHexString = (str) => {
@@ -231,7 +237,7 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
   res.setTimeout(300000);
   
   try {
-    const { accessToken, vaultId, itemId } = req.body;
+    const { accessToken, vaultId, itemId, checkType } = req.body;
 
     if (!accessToken) {
       return res.status(400).json({
@@ -429,6 +435,7 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
         tx.object(dataVaultId),
         tx.object(itemId),
         tx.pure.address(accessAddress),
+        tx.pure.u8(checkType),
         clockObject,
       ],
     });
@@ -502,6 +509,161 @@ app.post('/api/bowheadwhale/get-user-data', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to decrypt data',
+    });
+  }
+});
+
+// API endpoint for third-party platforms to request data update
+// POST /api/bowheadwhale/request-edit
+// Body: { itemId: string, newValue: string }
+// Backend will generate signature using server's private key
+app.post('/api/bowheadwhale/request-edit', async (req, res) => {
+  try {
+    const { itemId, newValue } = req.body;
+
+    if (!itemId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: itemId',
+      });
+    }
+
+    if (!newValue) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field: newValue',
+      });
+    }
+
+    // Generate expiration time (30 minutes)
+    const expireTime = Date.now() + 30 * 60 * 1000;
+
+    // Create message to sign: itemId + newValue + expireTime
+    const messageToSign = JSON.stringify({
+      itemId,
+      newValue,
+      expireTime,
+    });
+    const messageBytes = new TextEncoder().encode(messageToSign);
+
+    // Generate signature using server's keypair
+    const keypair = getKeypair();
+    const { signature } = await keypair.signPersonalMessage(messageBytes);
+
+    // Create token data with signature
+    const tokenData = {
+      itemId,
+      expireTime,
+      signature,
+    };
+
+    // Create token (base64 encoded JSON)
+    const tokenString = JSON.stringify(tokenData);
+    const token = Buffer.from(tokenString).toString('base64');
+
+    // Store request data in cache
+    editRequestCache.set(token, {
+      itemId,
+      newValue,
+      signature,
+      expireTime,
+      createdAt: Date.now(),
+    });
+
+    // Clean up expired entries (simple cleanup, in production use TTL)
+    setTimeout(() => {
+      editRequestCache.delete(token);
+    }, 30 * 60 * 1000);
+
+    // Return URL for user to authorize
+    const authUrl = `${clientUrl}/bowheadwhale/doauth_edit?token=${encodeURIComponent(token)}`;
+
+    console.log(`✅ Edit request created for itemId: ${itemId}, token: ${token.substring(0, 20)}...`);
+
+    res.json({
+      success: true,
+      message: 'Edit request created successfully',
+      data: {
+        authUrl,
+        token,
+        expireTime,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Request edit error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create edit request',
+    });
+  }
+});
+
+// API endpoint to get cached edit request data
+// GET /api/bowheadwhale/get-edit-request?token=xxx
+app.get('/api/bowheadwhale/get-edit-request', async (req, res) => {
+  try {
+    const { token } = req.query;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameter: token',
+      });
+    }
+
+    // Decode token
+    let tokenData;
+    try {
+      const tokenString = Buffer.from(token, 'base64').toString('utf-8');
+      tokenData = JSON.parse(tokenString);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid token format',
+      });
+    }
+
+    // Check if token has expired
+    if (Date.now() > tokenData.expireTime) {
+      return res.status(400).json({
+        success: false,
+        error: 'Token has expired',
+      });
+    }
+
+    // Get cached request data
+    const cachedData = editRequestCache.get(token);
+    if (!cachedData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Edit request not found or has expired',
+      });
+    }
+
+    // Verify token matches cached data
+    if (cachedData.itemId !== tokenData.itemId || 
+        cachedData.expireTime !== tokenData.expireTime ||
+        cachedData.signature !== tokenData.signature) {
+      return res.status(400).json({
+        success: false,
+        error: 'Token validation failed',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        itemId: cachedData.itemId,
+        newValue: cachedData.newValue,
+        signature: cachedData.signature,
+        expireTime: cachedData.expireTime,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Get edit request error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get edit request',
     });
   }
 });

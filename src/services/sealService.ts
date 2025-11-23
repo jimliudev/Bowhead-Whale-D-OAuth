@@ -5,6 +5,8 @@ import { stringToHexString } from "./utils";
 import { fromHex, toHex } from "@mysten/sui/utils";
 import { Transaction } from "@mysten/sui/transactions";
 import type { WalletAccount, WalletWithFeatures } from "@mysten/wallet-standard";
+import Header from '../components/Header'
+// Removed React hooks imports - they should not be used in service classes
 
 export interface SealConfig {
   keyServerUrl: string;
@@ -15,6 +17,8 @@ export interface EncryptedData {
   encryptedObject: Uint8Array<ArrayBuffer>;
   key: Uint8Array<ArrayBuffer>;
 }
+
+
 
 export class SealService {
   private keyServerUrl: string;
@@ -101,7 +105,8 @@ export class SealService {
     sealId: string,
     vaultId: string,
     itemId: string,
-    accessAddress: string
+    accessAddress: string,
+    checkType: number
   ): Promise<Uint8Array> {
     try {
       console.log('=== sealService.decrypt 開始 ===')
@@ -157,6 +162,7 @@ export class SealService {
               tx.object(vaultId),
               tx.object(itemId),
               tx.pure.address(accessAddress),
+              tx.pure.u8(checkType),
               clockObject,
         ]
       });
@@ -271,9 +277,13 @@ export class SealService {
     account: WalletAccount,
     message: Uint8Array
   ): Promise<string> {
+    if (!wallet || !account) {
+      throw new Error('Wallet not connected')
+    }
+
     try {
-      // Try to use wallet's signPersonalMessage feature
-      const signPersonalMessageFeature = (wallet.features as any)['sui:signPersonalMessage']
+      // Use wallet's signPersonalMessage feature
+      const signPersonalMessageFeature = wallet.features['sui:signPersonalMessage']
       if (signPersonalMessageFeature) {
         const result = await signPersonalMessageFeature.signPersonalMessage({
           message,
@@ -283,7 +293,7 @@ export class SealService {
       }
 
       // Fallback to signMessage
-      const signMessageFeature = (wallet.features as any)['sui:signMessage']
+      const signMessageFeature = wallet.features['sui:signMessage']
       if (signMessageFeature) {
         const result = await signMessageFeature.signMessage({
           message,
@@ -316,6 +326,7 @@ export class SealService {
     ttlMin: number = 10
   ): Promise<string> {
     try {
+
       console.log('🔑 Creating SessionKey...')
       
       // Create SessionKey
@@ -328,10 +339,12 @@ export class SealService {
 
       console.log('📝 SessionKey created, requesting signature...')
 
+
       // Sign personal message
       const personalMessage = sessionKey.getPersonalMessage()
       const signature = await this.signPersonalMessage(wallet, account, personalMessage)
       await sessionKey.setPersonalMessageSignature(signature)
+
 
       console.log('✅ SessionKey signed, exporting...')
 
@@ -386,6 +399,7 @@ export class SealService {
       // Check if signature is missing or needs to be refreshed
       if (!keyData.personalMessageSignature && wallet && account) {
         console.log('⚠️ SessionKey missing signature, requesting new signature...')
+
         const personalMessage = restoredSessionKey.getPersonalMessage()
         const signature = await this.signPersonalMessage(wallet, account, personalMessage)
         await restoredSessionKey.setPersonalMessageSignature(signature)

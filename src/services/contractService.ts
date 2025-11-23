@@ -34,23 +34,34 @@ export class ContractService {
 
   /**
    * Create an OAuth grant
+   * @param params.clientId - OAuth service client ID
+   * @param params.userAddress - User who granted access
+   * @param params.ownerAddress - Resource owner (usually same as userAddress)
+   * @param params.resourceEntries - Array of { dataId: string, allowType: number } where allowType: 0=View, 1=Edit
+   * @param params.expiresAt - Expiration timestamp in milliseconds
    */
   buildCreateOAuthGrantTx(params: {
     clientId: string
+    userAddress: string
     ownerAddress: string
-    resourceIds: string[]
+    resourceEntries: Array<{ dataId: string; allowType: number }>
     expiresAt: number
-    accessToken: string
   }): Transaction {
     const tx = new Transaction()
+    
+    // Extract data IDs and allow types into separate vectors
+    const resourceDataIds = params.resourceEntries.map(entry => entry.dataId)
+    const resourceAllowTypes = params.resourceEntries.map(entry => entry.allowType)
+    
     tx.moveCall({
       target: `${this.packageId}::oauth_service::create_oauth_grant_entry`,
       arguments: [
         tx.pure.string(params.clientId),
+        tx.pure.address(params.userAddress),
         tx.pure.address(params.ownerAddress),
-        tx.pure.vector('address', params.resourceIds),
+        tx.pure.vector('address', resourceDataIds),
+        tx.pure.vector('u8', resourceAllowTypes),
         tx.pure.u64(params.expiresAt),
-        tx.pure.string(params.accessToken),
         tx.object('0x6'), // Clock
       ],
     })
@@ -111,7 +122,9 @@ export class ContractService {
     vaultCapId: string
     vaultId: string
     name: string
+    shareType: number
     walrusBlobId: string
+    nonce: Uint8Array
   }): Transaction {
     const tx = new Transaction()
     tx.moveCall({
@@ -120,7 +133,9 @@ export class ContractService {
         tx.object(params.vaultCapId),
         tx.object(params.vaultId),
         tx.pure.string(params.name),
+        // tx.pure.u8(params.shareType),
         tx.pure.string(params.walrusBlobId),
+        // tx.pure.vector('u8', Array.from(params.nonce)),
       ],
     })
     return tx
@@ -205,7 +220,7 @@ export class ContractService {
         tx.object(params.vaultCapId),
         tx.object(params.vaultId),
         tx.pure.address(params.accessAddress),
-        tx.pure.u8(params.allowType),
+        // tx.pure.u8(params.allowType),
         tx.pure.u64(params.expiresAt),
         tx.object('0x6'), // Clock
       ],
@@ -1331,13 +1346,13 @@ export class ContractService {
     owner: any
     fields: {
       id: any
-      client_id: string
       user_address: string
-      owner_address: string
-      resource_ids: string[]
+      resource_ids: Array<{
+        data_id: string | { id: string }
+        allow_type: number
+      }>
       created_at: number
       expires_at: number
-      access_token: string
     }
   }>> {
     return this.getUserObjectsByType(client, ownerAddress, 'OAuthGrant', {
