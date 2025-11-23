@@ -9,6 +9,8 @@ import UserPage from './pages/UserPage'
 import DOAuthPage from './pages/DOAuthPage'
 import DOAuthPageNewWindow from './pages/DOAuthPageNewWindow'
 import OAuthTriggerPage from './pages/OAuthTriggerPage'
+import DOAuthEditPage from './pages/DOAuthEditPage'
+import AppServiceDemo from './pages/AppServiceDemo'
 import './App.css'
 
 function App() {
@@ -25,6 +27,8 @@ function App() {
         <Route path="/bowheadwhale/doauth_page" element={<DOAuthPage />} />
         <Route path="/bowheadwhale/doauth_page_new_window" element={<DOAuthPageNewWindow />} />
         <Route path="/bowheadwhale/oauth_trigger" element={<OAuthTriggerPage />} />
+        <Route path="/bowheadwhale/doauth_edit" element={<DOAuthEditPage />} />
+        <Route path="/bowheadwhale/app-service-demo" element={<AppServiceDemo />} />
       </Routes>
     </BrowserRouter>
   )

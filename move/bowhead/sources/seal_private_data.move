@@ -26,7 +26,6 @@ public struct DataVault has key {
     id: UID,
     owner: address,
     group_name: String,
-    allow_access_to: vector<AccessEntry>,  // List of addresses with expiration times
     items: vector<ID>,  // List of Data item IDs
 }
 
@@ -36,8 +35,7 @@ public struct Data has key {
     id: UID,
     vault_id: ID,
     name: String,  // File name
-    value: String,  // Walrus blob ID
-    allow_access_to: vector<AccessEntry>,
+    value: String  // Walrus blob ID
 }
 
 /// Capability token for managing a data vault for owner only.
@@ -49,8 +47,20 @@ public struct DataVaultCap has key {
 /// Access entry with expiration time for allow list
 public struct AccessEntry has store, copy, drop {
     address: address,
-    allow_type: u8,  // 0: View, 1: Edit,
     expires_at: u64,  // Expiration timestamp in milliseconds
+}
+
+public struct OAuthGrant has key {
+    id: UID,
+    user_address: address,
+    resource_ids: vector<AccessDataEntry>,
+    created_at: u64,
+    expires_at: u64,  // Expiration timestamp in milliseconds
+}
+
+public struct AccessDataEntry has store, copy, drop {
+    data_id: ID,
+    allow_type: u8, // 0: View, 1: Edit
 }
 
 /// Capability token for editing a data vault
@@ -60,7 +70,6 @@ public struct EditVaultDataCap has key {
     data_id: ID,
     expires_at: u64,  // Expiration timestamp in milliseconds
 }
-
 
 // === Events ===
 
@@ -105,7 +114,6 @@ fun create_data_vault(
         owner,
         group_name,
         items: vector::empty(),
-        allow_access_to: vector::empty<AccessEntry>(),
     };
 
     let cap = DataVaultCap {
@@ -142,7 +150,6 @@ fun create_data(
         vault_id: object::id(vault),
         name,
         value,
-        allow_access_to: vector::empty<AccessEntry>(),
     };
 
     vault.items.push_back(object::id(&item));
@@ -234,34 +241,6 @@ public entry fun add_to_allow_list(
     assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
     // Ensure expiration time is in the future
     assert!(expires_at > clock::timestamp_ms(clock), EShareExpired);
-
-    // Check if address is already in the list
-    let mut found = false;
-    let mut i = 0;
-    let allow_list_len = vector::length(&vault.allow_access_to);
-    while (i < allow_list_len) {
-        let entry = vector::borrow(&vault.allow_access_to, i);
-        if (entry.address == access_address) {
-            // Update expiration time and allow_type for existing entry
-            let mut updated_entry = *entry;
-            updated_entry.expires_at = expires_at;
-            updated_entry.allow_type = allow_type;
-            *vector::borrow_mut(&mut vault.allow_access_to, i) = updated_entry;
-            found = true;
-            break
-        };
-        i = i + 1;
-    };
-    
-    // Add new entry if not found
-    if (!found) {
-        let new_entry = AccessEntry {
-            address: access_address,
-            allow_type: allow_type,
-            expires_at,
-        };
-        vector::push_back(&mut vault.allow_access_to, new_entry);
-    };
 }
 
 // === Entry Functions ===
@@ -380,25 +359,6 @@ public entry fun update_data_by_third_party(
     // Check if EditVaultDataCap's data_id matches the data item
     assert!(edit_cap.data_id == object::id(item), EEditCapMismatch);
     
-    // Check if caller is in Data's allow_access_to whitelist with Edit permission
-    let mut found = false;
-    let mut i = 0;
-    let allow_list_len = vector::length(&item.allow_access_to);
-    while (i < allow_list_len) {
-        let entry = vector::borrow(&item.allow_access_to, i);
-        if (entry.address == caller) {
-            // Check if entry has Edit permission (allow_type == 1)
-            assert!(entry.allow_type == 1, ENoEditPermission);
-            // Check if entry hasn't expired
-            assert!(current_time <= entry.expires_at, EShareExpired);
-            found = true;
-            break
-        };
-        i = i + 1;
-    };
-    
-    // Ensure caller is in whitelist
-    assert!(found, ENoAccess);
     
     // Update the value
     item.value = new_value;
@@ -424,8 +384,157 @@ public entry fun create_data_vault_allow_list(
     add_to_allow_list(cap, vault, access_address, allow_type, expires_at, clock, ctx);
 }
 
-// === Seal Access Control ===
+// === OAuth Grant Functions ===
 
+/// Create an OAuth grant entry
+/// This function creates an OAuthGrant object to store authorization information on-chain
+/// resource_ids: Vector of data item IDs
+/// allow_types: Vector of permission types (0=View, 1=Edit) corresponding to each resource_id
+/// expires_at: Expiration timestamp in milliseconds (must be in the future)
+fun create_oauth_grant(
+    user_address: address,
+    resource_ids: vector<ID>,
+    allow_types: vector<u8>,
+    expires_at: u64,
+    clock: &Clock,
+    ctx: &mut TxContext
+): OAuthGrant {
+    let current_time = clock::timestamp_ms(clock);
+    
+    // Ensure expiration time is in the future
+    assert!(expires_at > current_time, EShareExpired);
+    
+    // Ensure resource_ids and allow_types have the same length
+    assert!(vector::length(&resource_ids) == vector::length(&allow_types), ENoAccess);
+    
+    // Build resource entries vector
+    let mut resource_entries = vector::empty<AccessDataEntry>();
+    let mut i = 0;
+    let len = vector::length(&resource_ids);
+    while (i < len) {
+        let data_id = *vector::borrow(&resource_ids, i);
+        let allow_type = *vector::borrow(&allow_types, i);
+        let entry = AccessDataEntry {
+            data_id,
+            allow_type,
+        };
+        vector::push_back(&mut resource_entries, entry);
+        i = i + 1;
+    };
+    
+    OAuthGrant {
+        id: object::new(ctx),
+        user_address,
+        resource_ids: resource_entries,
+        created_at: current_time,
+        expires_at,
+    }
+}
+
+/// Entry function to create an OAuth grant
+/// This is called when a user authorizes a third-party service to access their data
+/// resource_ids: Vector of data item IDs that are being authorized
+/// allow_types: Vector of permission types (0=View, 1=Edit) corresponding to each resource_id
+/// expires_at: Expiration timestamp in milliseconds (must be in the future)
+public entry fun create_oauth_grant_entry(
+    user_address: address,
+    resource_ids: vector<ID>,
+    allow_types: vector<u8>,
+    expires_at: u64,
+    clock: &Clock,
+    ctx: &mut TxContext
+) {
+    let caller = tx_context::sender(ctx);
+    
+    // Ensure the caller is the user_address (user must authorize their own data)
+    assert!(caller == user_address, ENotOwner);
+    
+    let grant = create_oauth_grant(user_address, resource_ids, allow_types, expires_at, clock, ctx);
+    
+    // Share the OAuthGrant object so it can be accessed by third-party services
+    transfer::share_object(grant);
+}
+
+/// Check if a user has OAuthGrant with Edit permission for a specific data item
+/// Returns true if:
+/// 1. OAuthGrant exists and belongs to the user
+/// 2. OAuthGrant has not expired
+/// 3. OAuthGrant contains the data_id with allow_type == 1 (Edit permission)
+public fun check_oauth_grant_edit_permission(
+    grant: &OAuthGrant,
+    data_id: ID,
+    user_address: address,
+    clock: &Clock
+): bool {
+    let current_time = clock::timestamp_ms(clock);
+    
+    // Check if grant belongs to the user
+    if (grant.user_address != user_address) {
+        return false
+    };
+    
+    // Check if grant has expired
+    if (current_time > grant.expires_at) {
+        return false
+    };
+    
+    // Check if grant contains the data_id with Edit permission (allow_type == 1)
+    let mut i = 0;
+    let len = vector::length(&grant.resource_ids);
+    while (i < len) {
+        let entry = vector::borrow(&grant.resource_ids, i);
+        if (entry.data_id == data_id && entry.allow_type == 1) {
+            return true
+        };
+        i = i + 1;
+    };
+    
+    false
+}
+
+/// Update data item using OAuthGrant
+/// Only works if:
+/// 1. OAuthGrant exists and belongs to the user
+/// 2. OAuthGrant has not expired
+/// 3. OAuthGrant contains the data_id with allow_type == 1 (Edit permission)
+/// 4. Caller is the user who owns the grant
+public entry fun update_data_by_oauth_grant(
+    grant: &OAuthGrant,
+    item: &mut Data,
+    new_value: String,  // New Walrus blob ID
+    clock: &Clock,
+    ctx: &TxContext
+) {
+    let caller = tx_context::sender(ctx);
+    let current_time = clock::timestamp_ms(clock);
+    let data_id = object::id(item);
+    
+    // Check if grant belongs to the caller
+    assert!(grant.user_address == caller, ENotOwner);
+    
+    // Check if grant has expired
+    assert!(current_time <= grant.expires_at, EShareExpired);
+    
+    // Check if grant contains the data_id with Edit permission (allow_type == 1)
+    let mut found = false;
+    let mut i = 0;
+    let len = vector::length(&grant.resource_ids);
+    while (i < len) {
+        let entry = vector::borrow(&grant.resource_ids, i);
+        if (entry.data_id == data_id && entry.allow_type == 1) {
+            found = true;
+            break
+        };
+        i = i + 1;
+    };
+    
+    assert!(found, ENoEditPermission);
+    
+    // Update the value
+    item.value = new_value;
+}
+
+// === Seal Access Control ===
 
 /// Check policy for read-only access
 /// Seal ID format: [vault_id_bytes][nonce]
@@ -435,6 +544,7 @@ fun check_readonly_policy(
     vault: &DataVault,
     item: &Data,
     access_address: address,
+    check_type: u8,
     clock: &Clock,
     ctx: &TxContext
 ): bool {
@@ -450,88 +560,41 @@ fun check_readonly_policy(
         return false
     };
 
+    // Check if the check_type is 0 (self access)
+    if (check_type == 0) {
+        return true
+    };
+
     // Check if access_address is in the allow_access_to list and hasn't expired
     // Also verify that allow_type is 0 (View permission) for seal_approve
-    let mut i = 0;
-    let allow_list_len = vector::length(&vault.allow_access_to);
-    let current_time = clock::timestamp_ms(clock);
-    while (i < allow_list_len) {
-        let entry = vector::borrow(&vault.allow_access_to, i);
-        if (entry.address == access_address) {
-            // Check if entry hasn't expired
-            if (current_time <= entry.expires_at) {
-                // Verify allow_type is 0 (View permission) for seal_approve
-                // allow_type: 0 = View, 1 = Edit
-                if (entry.allow_type == 0) {
-                    return true
-                } else {
-                    // Entry exists but doesn't have View permission
-                    return false
-                }
-            } else {
-                // Entry has expired
-                return false
-            }
-        };
-        i = i + 1;
-    };
+    // let mut i = 0;
+    // let allow_list_len = vector::length(&vault.allow_access_to);
+    // let current_time = clock::timestamp_ms(clock);
+    // while (i < allow_list_len) {
+    //     let entry = vector::borrow(&vault.allow_access_to, i);
+    //     if (entry.address == access_address) {
+    //         // Check if entry hasn't expired
+    //         if (current_time <= entry.expires_at) {
+    //             return false
+    //         } else {
+    //             // Entry has expired
+    //             return false
+    //         }
+    //     };
+    //     i = i + 1;
+    // };
 
     false
-}
-
-/// Remove expired entries from the allow list
-/// Only the vault owner can clean the allow list
-public entry fun clean_expired_allow_list(
-    cap: &DataVaultCap,
-    vault: &mut DataVault,
-    clock: &Clock,
-    ctx: &TxContext
-) {
-    assert!(cap.vault_id == object::id(vault), ENotOwner);
-    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
-
-    let current_time = clock::timestamp_ms(clock);
-    let mut i = 0;
-    while (i < vector::length(&vault.allow_access_to)) {
-        let entry = vector::borrow(&vault.allow_access_to, i);
-        if (entry.expires_at < current_time) {
-            // Entry has expired, remove it
-            vector::remove(&mut vault.allow_access_to, i);
-        } else {
-            i = i + 1;
-        };
-    };
-}
-
-/// Remove a specific address from the allow list
-/// Only the vault owner can remove addresses
-public entry fun remove_from_allow_list(
-    cap: &DataVaultCap,
-    vault: &mut DataVault,
-    access_address: address,
-    ctx: &TxContext
-) {
-    assert!(cap.vault_id == object::id(vault), ENotOwner);
-    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
-
-    let mut i = 0;
-    while (i < vector::length(&vault.allow_access_to)) {
-        let entry = vector::borrow(&vault.allow_access_to, i);
-        if (entry.address == access_address) {
-            vector::remove(&mut vault.allow_access_to, i);
-            break
-        };
-        i = i + 1;
-    };
 }
 
 public fun check_seal_approve_for_test(
     vault: &DataVault,
     item: &Data,
     access_address: address,
+    check_type: u8,
     clock: &Clock,
     ctx: &TxContext) : bool{
-    let result = check_readonly_policy(vault, item, access_address, clock, ctx);
+    let result = check_readonly_policy( vault, item, access_address, check_type, clock, ctx);
     result
 }
 
@@ -544,10 +607,11 @@ public entry fun seal_approve(
     vault: &DataVault,
     item: &Data,
     access_address: address,
+    check_type: u8,
     clock: &Clock,
     ctx: &TxContext
 ) {
-    assert!(check_readonly_policy(vault, item, access_address, clock, ctx), ENoAccess);
+    assert!(check_readonly_policy(vault, item, access_address, check_type, clock, ctx), ENoAccess);
 }
 
 
@@ -563,18 +627,4 @@ public fun get_vault_info(vault: &DataVault): (ID, address, String, u64, vector<
         vector::length(&vault.items),
         vault.items,
     )
-}
-
-
-/// Get allow list information
-/// Returns vector of addresses and their expiration times
-/// Only vault owner can view this information
-public fun get_allow_list_info(
-    cap: &DataVaultCap,
-    vault: &DataVault,
-    ctx: &TxContext
-): vector<AccessEntry> {
-    assert!(cap.vault_id == object::id(vault), ENotOwner);
-    assert!(vault.owner == tx_context::sender(ctx), ENotOwner);
-    vault.allow_access_to
 }

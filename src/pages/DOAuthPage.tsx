@@ -6,6 +6,7 @@ import {
   useSignAndExecuteTransaction,
   useDisconnectWallet,
   ConnectButton,
+  useSignPersonalMessage,
 } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
@@ -32,6 +33,9 @@ export default function DOAuthPage() {
   const serviceAddress = searchParams.get('service')
   const isConnected = Boolean(currentAccount)
   const [showSettings, setShowSettings] = useState(false)
+
+  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
+
 
   useEffect(() => {
     // Add class to body to override default styles
@@ -163,19 +167,20 @@ export default function DOAuthPage() {
     1: 'Edit',
     2: 'Delete',
   }
+  
 
-  const handleResourceToggle = (resourceId: string, permissionType: number) => {
+  const handleResourceToggle = (resourceId: string) => {
     setSelectedResources((prev) => {
-      // If already selected with the same permission, deselect it
-      if (prev[resourceId] === permissionType) {
+      // If already selected, deselect it
+      if (prev.hasOwnProperty(resourceId)) {
         const newSelection = { ...prev }
         delete newSelection[resourceId]
         console.log('Deselected resource:', resourceId)
         return newSelection
       }
-      // Otherwise, set the permission type
-      const newSelection = { ...prev, [resourceId]: permissionType }
-      console.log('Selected resource:', resourceId, 'with permission:', permissionType === 0 ? 'View' : 'Edit')
+      // Otherwise, select it with View permission (0)
+      const newSelection = { ...prev, [resourceId]: 0 }
+      console.log('Selected resource:', resourceId, 'with permission: View')
       return newSelection
     })
   }
@@ -205,9 +210,6 @@ export default function DOAuthPage() {
     setStatus('Creating read-only capabilities...')
 
     try {
-      // Generate access token
-      const accessToken = generateAccessToken()
-
       // Calculate expiration (30 mins from now)
       const expiresAt = Date.now() + 30 * 60 * 1000
 
@@ -256,7 +258,8 @@ export default function DOAuthPage() {
           continue
         }
 
-        const allowType = selectedResources[vaultId] ?? 0
+        // All selected items have View permission (0) only
+        const allowType = 0
 
         // Add service owner to allow list
         tx.moveCall({
@@ -265,12 +268,31 @@ export default function DOAuthPage() {
             tx.object(vaultCapId),
             tx.object(vaultId),
             tx.pure.address(serviceOwnerAddress),
-            tx.pure.u8(allowType), // allow_type: 0 = View
+            tx.pure.u8(allowType),
             tx.pure.u64(expiresAt),
             tx.object('0x6'), // Clock
           ],
         })
       }
+
+      // Step 2: Create OAuthGrant to store authorization on-chain
+      setStatus('Creating OAuth grant...')
+      const resourceEntries = selectedItems.map(item => ({
+        dataId: item.id,
+        allowType: selectedResources[item.id] ?? 0,
+      }))
+
+      // Add moveCall to create OAuthGrant
+      tx.moveCall({
+        target: `${SEAL_PACKAGE_ID}::seal_private_data::create_oauth_grant_entry`,
+        arguments: [
+          tx.pure.address(currentAccount.address),
+          tx.pure.vector('address', resourceEntries.map(e => e.dataId)),
+          tx.pure.vector('u8', resourceEntries.map(e => e.allowType)),
+          tx.pure.u64(expiresAt),
+          tx.object('0x6'), // Clock
+        ],
+      })
 
       setStatus('Signing and executing transaction...')
       const result = await signAndExecuteTransaction({
@@ -297,28 +319,6 @@ export default function DOAuthPage() {
 
   const sealService = new SealService()
 
-  const signPersonalMessage = async (message: Uint8Array): Promise<string> => {
-    if (!currentWallet || !currentAccount) {
-      throw new Error('Wallet not connected')
-    }
-
-    try {
-      // Use wallet's signPersonalMessage feature
-      const signPersonalMessageFeature = currentWallet.features['sui:signPersonalMessage']
-      if (signPersonalMessageFeature) {
-        const result = await signPersonalMessageFeature.signPersonalMessage({
-          message,
-          account: currentAccount,
-        })
-        return result.signature
-      }
-      throw new Error('Wallet does not support signPersonalMessage')
-    } catch (err: any) {
-      console.error('Sign personal message error:', err)
-      throw new Error(`Failed to sign message: ${err?.message || 'Unknown error'}`)
-    }
-  }
-
   const handleGenerateAccessToken = async () => {
     if (!serviceInfo) {
       setError('Missing service information')
@@ -337,13 +337,35 @@ export default function DOAuthPage() {
     try {
       // Use SealService to create and export SessionKey as base64
       setStatus('Please sign in your wallet to create SessionKey...')
-      const sessionKeyBase64 = await sealService.createAndExportSessionKeyAsBase64(
-        currentAccount.address,
-        currentWallet,
-        currentAccount,
+      // const sessionKeyBase64 = await sealService.createAndExportSessionKeyAsBase64(
+      //   currentAccount.address,
+      //   currentWallet,
+      //   currentAccount,
+      //   suiClient,
+      //   10 // ttlMin: 10 minutes
+      // )
+
+      const sessionKey = await SessionKey.create({
+        address: currentAccount.address,
+        packageId: SEAL_PACKAGE_ID,
+        ttlMin: 20,
         suiClient,
-        10 // ttlMin: 10 minutes
-      )
+      })
+
+
+      // Sign personal message
+      const personalMessage = sessionKey.getPersonalMessage()
+      const signature = await signPersonalMessage({ message: personalMessage })
+      await sessionKey.setPersonalMessageSignature(signature.signature)
+
+      console.log('✅ SessionKey signed, exporting...')
+
+      // Export SessionKey to JSON
+      const sessionKeyJson = sealService.serializeSessionKey(sessionKey)
+      console.log('📦 SessionKey JSON exported')
+
+      // Convert JSON to base64
+      const sessionKeyBase64 = btoa(unescape(encodeURIComponent(sessionKeyJson)))
 
       // test decrypt
       // const newSessionKey = await SessionKey.create({
@@ -562,11 +584,12 @@ export default function DOAuthPage() {
                     <div className="resources-list">
                       {userDataItems.map((item) => {
                         const isSelected = selectedResources.hasOwnProperty(item.id)
-                        const selectedPermission = selectedResources[item.id] ?? null
                         return (
                           <div 
                             key={item.id} 
                             className={`resource-item-container ${isSelected ? 'resource-item-selected' : ''}`}
+                            onClick={() => !loading && handleResourceToggle(item.id)}
+                            style={{ cursor: loading ? 'not-allowed' : 'pointer' }}
                           >
                             <div className="resource-checkbox-wrapper">
                               <div className="resource-info">
@@ -587,32 +610,13 @@ export default function DOAuthPage() {
                               </div>
                               <div className="resource-permission-selector">
                                 <div className="permission-options">
-                                  <button
-                                    type="button"
-                                    className={`permission-option ${selectedPermission === 0 ? 'permission-option-active' : ''}`}
-                                    onClick={() => handleResourceToggle(item.id, 0)}
-                                    disabled={loading}
-                                    title="View only"
-                                  >
+                                  <div className={`permission-option ${isSelected ? 'permission-option-active' : ''}`}>
                                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                                       <path d="M8 2.667C4.667 2.667 2 5.333 2 8.667s2.667 6 6 6 6-2.667 6-6-2.667-6-6-6zm0 10.667c-2.573 0-4.667-2.094-4.667-4.667S5.427 4 8 4s4.667 2.094 4.667 4.667S10.573 13.333 8 13.333z" fill="currentColor"/>
                                       <path d="M8 6c-1.467 0-2.667 1.2-2.667 2.667h1.333c0-.733.6-1.333 1.333-1.333s1.333.6 1.333 1.333H10.667C10.667 7.2 9.467 6 8 6z" fill="currentColor"/>
                                     </svg>
                                     <span>View</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`permission-option ${selectedPermission === 1 ? 'permission-option-active' : ''}`}
-                                    onClick={() => handleResourceToggle(item.id, 1)}
-                                    disabled={loading}
-                                    title="Edit"
-                                  >
-                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                      <path d="M11.333 2.667c.733 0 1.334.6 1.334 1.333v8c0 .733-.6 1.333-1.334 1.333H4.667c-.733 0-1.334-.6-1.334-1.333V4c0-.733.6-1.333 1.334-1.333h2V2H4.667C3.194 2 2 3.194 2 4.667v6.666C2 12.806 3.194 14 4.667 14h6.666C12.806 14 14 12.806 14 11.333V4.667C14 3.194 12.806 2 11.333 2z" fill="currentColor"/>
-                                      <path d="M10.667 2.667L6 7.333v2.667h2.667l4.667-4.667V2.667h-2.667z" fill="currentColor"/>
-                                    </svg>
-                                    <span>Edit</span>
-                                  </button>
+                                  </div>
                                 </div>
                               </div>
                             </div>

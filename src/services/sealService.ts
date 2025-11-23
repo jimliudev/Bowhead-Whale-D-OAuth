@@ -5,6 +5,7 @@ import { stringToHexString } from "./utils";
 import { fromHex, toHex } from "@mysten/sui/utils";
 import { Transaction } from "@mysten/sui/transactions";
 import type { WalletAccount, WalletWithFeatures } from "@mysten/wallet-standard";
+import Header from '../components/Header'
 // Removed React hooks imports - they should not be used in service classes
 
 export interface SealConfig {
@@ -16,6 +17,8 @@ export interface EncryptedData {
   encryptedObject: Uint8Array<ArrayBuffer>;
   key: Uint8Array<ArrayBuffer>;
 }
+
+
 
 export class SealService {
   private keyServerUrl: string;
@@ -102,7 +105,8 @@ export class SealService {
     sealId: string,
     vaultId: string,
     itemId: string,
-    accessAddress: string
+    accessAddress: string,
+    checkType: number
   ): Promise<Uint8Array> {
     try {
       console.log('=== sealService.decrypt 開始 ===')
@@ -158,6 +162,7 @@ export class SealService {
               tx.object(vaultId),
               tx.object(itemId),
               tx.pure.address(accessAddress),
+              tx.pure.u8(checkType),
               clockObject,
         ]
       });
@@ -321,6 +326,7 @@ export class SealService {
     ttlMin: number = 10
   ): Promise<string> {
     try {
+
       console.log('🔑 Creating SessionKey...')
       
       // Create SessionKey
@@ -332,6 +338,7 @@ export class SealService {
       })
 
       console.log('📝 SessionKey created, requesting signature...')
+
 
       // Sign personal message
       const personalMessage = sessionKey.getPersonalMessage()
@@ -392,6 +399,7 @@ export class SealService {
       // Check if signature is missing or needs to be refreshed
       if (!keyData.personalMessageSignature && wallet && account) {
         console.log('⚠️ SessionKey missing signature, requesting new signature...')
+
         const personalMessage = restoredSessionKey.getPersonalMessage()
         const signature = await this.signPersonalMessage(wallet, account, personalMessage)
         await restoredSessionKey.setPersonalMessageSignature(signature)
