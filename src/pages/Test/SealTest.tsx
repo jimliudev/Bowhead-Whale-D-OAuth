@@ -536,7 +536,8 @@ export default function SealTest() {
         manualSealId.trim(),
         manualVaultId.trim(),
         manualItemId.trim(),
-        manualReadonlyCapId.trim()
+        manualReadonlyCapId.trim(),
+        0
       )
       console.log('✅ 解密完成，解密數據長度:', decrypted.length)
 
