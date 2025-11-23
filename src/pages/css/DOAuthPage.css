@@ -859,6 +859,205 @@
   color: #ffffff;
 }
 
+/* Authorization Success Page - Apple-inspired design */
+.oauth-success-card {
+  text-align: center;
+  padding: 0;
+}
+
+.oauth-success-header {
+  padding: 3rem 2rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.oauth-success-icon-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: successIconAppear 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes successIconAppear {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.oauth-success-icon {
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.oauth-success-icon svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 4px 12px rgba(52, 199, 89, 0.2));
+}
+
+.oauth-success-title {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #1d1d1f;
+  margin: 0;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.oauth-success-subtitle {
+  font-size: 0.9375rem;
+  color: #86868b;
+  margin: 0;
+  line-height: 1.5;
+  max-width: 400px;
+  letter-spacing: -0.01em;
+}
+
+.oauth-success-content {
+  padding: 0 2rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  align-items: center;
+}
+
+.oauth-grant-info {
+  width: 100%;
+  max-width: 400px;
+  padding: 1.25rem;
+  background: #f5f5f7;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  text-align: left;
+}
+
+.oauth-grant-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #86868b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.oauth-grant-value {
+  font-size: 0.875rem;
+  color: #1d1d1f;
+  font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+  word-break: break-all;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+}
+
+.oauth-success-actions {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.oauth-success-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem 2rem;
+  background: #0071e3;
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  min-height: 52px;
+  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.2);
+}
+
+.oauth-success-button:hover:not(:disabled) {
+  background: #0077ed;
+  box-shadow: 0 4px 16px rgba(0, 113, 227, 0.3);
+  transform: translateY(-1px);
+}
+
+.oauth-success-button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.2);
+}
+
+.oauth-success-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.oauth-button-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Mobile responsive for success page */
+@media (max-width: 600px) {
+  .oauth-success-header {
+    padding: 2.5rem 1.5rem 1.5rem;
+    gap: 1.25rem;
+  }
+
+  .oauth-success-icon {
+    width: 64px;
+    height: 64px;
+  }
+
+  .oauth-success-title {
+    font-size: 1.5rem;
+  }
+
+  .oauth-success-subtitle {
+    font-size: 0.875rem;
+  }
+
+  .oauth-success-content {
+    padding: 0 1.5rem 2.5rem;
+    gap: 1.5rem;
+  }
+
+  .oauth-grant-info {
+    padding: 1rem;
+  }
+
+  .oauth-success-button {
+    padding: 0.875rem 1.5rem;
+    font-size: 0.9375rem;
+    min-height: 48px;
+  }
+}
+
 .permission-option:active svg {
   transform: scale(0.95);
 }

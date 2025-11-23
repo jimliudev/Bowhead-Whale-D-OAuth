@@ -242,9 +242,10 @@ public entry fun add_to_allow_list(
     while (i < allow_list_len) {
         let entry = vector::borrow(&vault.allow_access_to, i);
         if (entry.address == access_address) {
-            // Update expiration time for existing entry
+            // Update expiration time and allow_type for existing entry
             let mut updated_entry = *entry;
             updated_entry.expires_at = expires_at;
+            updated_entry.allow_type = allow_type;
             *vector::borrow_mut(&mut vault.allow_access_to, i) = updated_entry;
             found = true;
             break
@@ -450,6 +451,7 @@ fun check_readonly_policy(
     };
 
     // Check if access_address is in the allow_access_to list and hasn't expired
+    // Also verify that allow_type is 0 (View permission) for seal_approve
     let mut i = 0;
     let allow_list_len = vector::length(&vault.allow_access_to);
     let current_time = clock::timestamp_ms(clock);
@@ -458,7 +460,14 @@ fun check_readonly_policy(
         if (entry.address == access_address) {
             // Check if entry hasn't expired
             if (current_time <= entry.expires_at) {
-                return true
+                // Verify allow_type is 0 (View permission) for seal_approve
+                // allow_type: 0 = View, 1 = Edit
+                if (entry.allow_type == 0) {
+                    return true
+                } else {
+                    // Entry exists but doesn't have View permission
+                    return false
+                }
             } else {
                 // Entry has expired
                 return false

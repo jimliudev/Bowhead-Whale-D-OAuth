@@ -5,6 +5,7 @@ import { stringToHexString } from "./utils";
 import { fromHex, toHex } from "@mysten/sui/utils";
 import { Transaction } from "@mysten/sui/transactions";
 import type { WalletAccount, WalletWithFeatures } from "@mysten/wallet-standard";
+// Removed React hooks imports - they should not be used in service classes
 
 export interface SealConfig {
   keyServerUrl: string;
@@ -271,9 +272,13 @@ export class SealService {
     account: WalletAccount,
     message: Uint8Array
   ): Promise<string> {
+    if (!wallet || !account) {
+      throw new Error('Wallet not connected')
+    }
+
     try {
-      // Try to use wallet's signPersonalMessage feature
-      const signPersonalMessageFeature = (wallet.features as any)['sui:signPersonalMessage']
+      // Use wallet's signPersonalMessage feature
+      const signPersonalMessageFeature = wallet.features['sui:signPersonalMessage']
       if (signPersonalMessageFeature) {
         const result = await signPersonalMessageFeature.signPersonalMessage({
           message,
@@ -283,7 +288,7 @@ export class SealService {
       }
 
       // Fallback to signMessage
-      const signMessageFeature = (wallet.features as any)['sui:signMessage']
+      const signMessageFeature = wallet.features['sui:signMessage']
       if (signMessageFeature) {
         const result = await signMessageFeature.signMessage({
           message,
@@ -332,6 +337,7 @@ export class SealService {
       const personalMessage = sessionKey.getPersonalMessage()
       const signature = await this.signPersonalMessage(wallet, account, personalMessage)
       await sessionKey.setPersonalMessageSignature(signature)
+
 
       console.log('✅ SessionKey signed, exporting...')
 

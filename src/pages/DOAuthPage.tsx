@@ -9,11 +9,13 @@ import {
 } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
 import { SEAL_PACKAGE_ID } from '../config'
 import { contractService } from '../services/contractService'
 import { SealService } from '../services/sealService'
 import './css/PageLayout.css'
 import './css/DOAuthPage.css'
+import { SessionKey } from '@mysten/seal'
 
 const suiClient = new SuiClient({
   url: getFullnodeUrl('testnet'),
@@ -254,6 +256,8 @@ export default function DOAuthPage() {
           continue
         }
 
+        const allowType = selectedResources[vaultId] ?? 0
+
         // Add service owner to allow list
         tx.moveCall({
           target: `${SEAL_PACKAGE_ID}::seal_private_data::create_data_vault_allow_list`,
@@ -261,6 +265,7 @@ export default function DOAuthPage() {
             tx.object(vaultCapId),
             tx.object(vaultId),
             tx.pure.address(serviceOwnerAddress),
+            tx.pure.u8(allowType), // allow_type: 0 = View
             tx.pure.u64(expiresAt),
             tx.object('0x6'), // Clock
           ],
@@ -272,29 +277,7 @@ export default function DOAuthPage() {
         transaction: tx as any,
       })
 
-      console.log('OAuth grant created:', result)
-
-      // Extract grant ID from result
-      const resultAny = result as any
-      let extractedGrantId: string | null = null
-      if (resultAny.objectChanges) {
-        const grantChange = resultAny.objectChanges.find(
-          (change: any) =>
-            change.type === 'created' && change.objectType?.includes('OAuthGrant')
-        )
-        if (grantChange) {
-          extractedGrantId = grantChange.objectId
-        }
-      }
-
-      console.log('Authorization successful, setting states...', {
-        grantId: extractedGrantId,
-        accessToken: accessToken, // This is the temporary token for grant creation
-      })
-
-      // Save authorization result and show success page
-      // IMPORTANT: Set these states in the correct order to prevent any race conditions
-      setGrantId(extractedGrantId)
+     
       setError(null) // Clear any previous errors
       setStatus('✅ Authorization successful!')
       
@@ -313,6 +296,28 @@ export default function DOAuthPage() {
   }
 
   const sealService = new SealService()
+
+  const signPersonalMessage = async (message: Uint8Array): Promise<string> => {
+    if (!currentWallet || !currentAccount) {
+      throw new Error('Wallet not connected')
+    }
+
+    try {
+      // Use wallet's signPersonalMessage feature
+      const signPersonalMessageFeature = currentWallet.features['sui:signPersonalMessage']
+      if (signPersonalMessageFeature) {
+        const result = await signPersonalMessageFeature.signPersonalMessage({
+          message,
+          account: currentAccount,
+        })
+        return result.signature
+      }
+      throw new Error('Wallet does not support signPersonalMessage')
+    } catch (err: any) {
+      console.error('Sign personal message error:', err)
+      throw new Error(`Failed to sign message: ${err?.message || 'Unknown error'}`)
+    }
+  }
 
   const handleGenerateAccessToken = async () => {
     if (!serviceInfo) {
@@ -340,6 +345,26 @@ export default function DOAuthPage() {
         10 // ttlMin: 10 minutes
       )
 
+      // test decrypt
+      // const newSessionKey = await SessionKey.create({
+      //   address: currentAccount.address,
+      //   packageId: SEAL_PACKAGE_ID,
+      //   ttlMin: 30,
+      //   suiClient,
+      // })
+
+      // Sign personal message
+      setStatus('Please sign message in your wallet...')
+      // const personalMessage = newSessionKey.getPersonalMessage()
+      // const signature = await signPersonalMessage(personalMessage)
+      // await newSessionKey.setPersonalMessageSignature(signature)
+
+      // const sessionKeyJson = sealService.serializeSessionKey(newSessionKey)
+      console.log('📦 SessionKey JSON exported')
+
+      // Convert JSON to base64
+      // const sessionKeyBase64 = btoa(unescape(encodeURIComponent(sessionKeyJson)))
+
       console.log('✅ SessionKey created and exported as base64')
 
       setStatus('Redirecting to service...')
@@ -347,9 +372,6 @@ export default function DOAuthPage() {
       // Redirect to service's redirect URL with base64 encoded SessionKey as access token
       const redirectUrl = new URL(serviceInfo.redirectUrl)
       redirectUrl.searchParams.set('access_token', sessionKeyBase64)
-      if (grantId) {
-        redirectUrl.searchParams.set('grant_id', grantId)
-      }
 
       // Redirect immediately
       window.location.href = redirectUrl.toString()
@@ -369,39 +391,55 @@ export default function DOAuthPage() {
     return (
       <div className="oauth-page">
         <div className="oauth-container">
-          <div className="oauth-card">
-            <div className="oauth-header">
-              <div className="oauth-header-top">
-                <div className="oauth-logo">🐋</div>
-                <div className="oauth-header-text">
-                  <h1 className="oauth-title">✅ Authorization Successful</h1>
-                  <p className="oauth-subtitle">
-                    Your authorization has been completed successfully.
-                  </p>
+          <div className="oauth-card oauth-success-card">
+            <div className="oauth-success-header">
+              <div className="oauth-success-icon-wrapper">
+                <div className="oauth-success-icon">
+                  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="32" cy="32" r="32" fill="#34C759" opacity="0.1"/>
+                    <path d="M32 8C18.745 8 8 18.745 8 32s10.745 24 24 24 24-10.745 24-24S45.255 8 32 8zm0 44c-11.046 0-20-8.954-20-20S20.954 12 32 12s20 8.954 20 20-8.954 20-20 20z" fill="#34C759"/>
+                    <path d="M26 32l6 6 10-10" stroke="#34C759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
                 </div>
               </div>
+              <h1 className="oauth-success-title">Authorization Successful</h1>
+              <p className="oauth-success-subtitle">
+                Your data has been authorized successfully. You can now generate an access token to continue.
+              </p>
             </div>
 
-            <div className="oauth-content">
-              <div className="oauth-success-message">
-                <div className="success-icon">✓</div>
-                <h2>Ready to Generate Access Token</h2>
-                <p>
-                  Click the button below to generate the access token and redirect to the service.
-                </p>
-                
-                {grantId && (
-                  <div className="grant-info">
-                    <p><strong>Grant ID:</strong> {grantId}</p>
-                  </div>
-                )}
+            <div className="oauth-success-content">
+              {grantId && (
+                <div className="oauth-grant-info">
+                  <div className="oauth-grant-label">Grant ID</div>
+                  <div className="oauth-grant-value">{grantId}</div>
+                </div>
+              )}
 
+              <div className="oauth-success-actions">
                 <button
-                  className="oauth-authorize-button"
+                  className="oauth-success-button"
                   onClick={handleGenerateAccessToken}
                   disabled={loading}
                 >
-                  {loading ? 'Processing...' : '产生 accessToken to service'}
+                  {loading ? (
+                    <>
+                      <svg className="oauth-button-spinner" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="31.416" strokeDashoffset="31.416">
+                          <animate attributeName="stroke-dasharray" dur="2s" values="0 31.416;15.708 15.708;0 31.416;0 31.416" repeatCount="indefinite"/>
+                          <animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416;-31.416" repeatCount="indefinite"/>
+                        </circle>
+                      </svg>
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Generate Access Token</span>
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <path d="M7.5 15L12.5 10L7.5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
