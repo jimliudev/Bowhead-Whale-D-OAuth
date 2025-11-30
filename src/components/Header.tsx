@@ -149,12 +149,12 @@ export default function Header({ title, backTo = '/', backLabel = 'Back', rightL
                       <path d="M6 12L10 8L6 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </Link>
-                  <Link to="/demo" className="settings-link" onClick={() => setShowSettings(false)}>
+                  {/* <Link to="/demo" className="settings-link" onClick={() => setShowSettings(false)}>
                     <span>Demo</span>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                       <path d="M6 12L10 8L6 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
-                  </Link>
+                  </Link> */}
                   {onAccountClick && (
                     <button
                       className="settings-link"
@@ -177,7 +177,7 @@ export default function Header({ title, backTo = '/', backLabel = 'Back', rightL
                 </div>
               </div>
 
-              <div className="settings-section">
+              {/* <div className="settings-section">
                 <h3 className="settings-section-title">Test Pages</h3>
                 <div className="settings-links">
                   <Link to="/walrus-test" className="settings-link" onClick={() => setShowSettings(false)}>
@@ -199,7 +199,7 @@ export default function Header({ title, backTo = '/', backLabel = 'Back', rightL
                     </svg>
                   </Link>
                 </div>
-              </div>
+              </div> */}
             </div>
           </div>
         </div>
