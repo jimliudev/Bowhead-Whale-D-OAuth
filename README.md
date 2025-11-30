@@ -6,6 +6,71 @@
 
 Bowhead Whale (also known as D OAuth) is a **decentralized OAuth infrastructure** that provides secure, decentralized user data management and authorization mechanisms for the Web3 ecosystem. By combining **Walrus Blob storage** and the **Seal encryption protocol**, it achieves fully decentralized user data management and third-party service authorization flows.
 
+### 🌟 **Main Features**
+
+1. 👤 **Regular Users :** Can store text, images, messages, and other data. All information is end-to-end encrypted via the Seal protocol and securely stored using Walrus decentralized storage.
+
+2. **Third-party Services :** Must register with Bowhead Whale and obtain user authorization via OAuth to access user data. All data access is fully transparent and controllable.
+
+## 📊 Workflows
+
+### Path 1: ThirdParty Service Registration
+
+![oauth-flow](./img/oauth-flow-service-register.png)
+
+```
+Step 1: The ThirdParty Service want to use the user data, 
+So register their service on the Bowhead Whale - D OAuth System.
+
+Step 2: Bowhead Whale - D OAuth System will generate and display the OAuth Authorization Link. 
+The Third-Party Service must save this link and trigger it when a user attempts to log in.
+```
+
+### Path 2: User D OAuth Login
+![oauth-flow](./img/oauth-flow-user-register.png)
+
+```
+Step 1: Users can store their private data on the Bowhead Whale D OAuth System, 
+much like they would on Google Drive.
+
+Step 2: Bowhead Whale - D OAuth System use Seal encypt the user data and store on Walrus.
+```
+
+### Path 3: Service Provider Accessing User Resources
+
+![oauth-flow](./img/oauth-flow.png)
+
+```
+Step 1: User use the ThirdParty Service at first time
+        User → ThirdParty Service
+
+Step 2: Users click the Login or SignIn button and will trigger the OAuth Authorization Link. 
+        The ThirdParty Service need to set the OAuth Authorization Link in the Login or SignIn button.
+        ThirdParty Service → Bowhead Whale - D OAuth System
+
+Step 3: Bowhead Whale - D OAuth System check the ThirdParty Service address
+        Bowhead Whale - D OAuth System → User Resource
+
+Step 4: Return the Authorization Page to User
+        Bowhead Whale - D OAuth System → Authorization Page → User
+
+Step 5: The user selects the data they wish to authorize for the Third-Party Service
+        User → Authorization Page (select resources)
+
+Step 6: Bowhead Whale - D OAuth System check the user's private information
+        Authorization Page → Bowhead Whale - D OAuth System → User Resource
+
+Step 7: Bowhead Whale - D OAuth System send the accessToken to ThirdParty Service
+        Bowhead Whale - D OAuth System → ThirdParty Service (accessToken)
+
+Step 8: ThirdParty Service send the accessToken, vault id and item id to Bowhead Whale - D OAuth System 
+        via Http API, and get the users data
+        ThirdParty Service → Bowhead Whale - D OAuth System (accessToken, vault_id, item_id)
+        → Return encrypted resource URL
+        → Service provider decrypts using secret_key
+```
+
+
 ## 🎯 Core Pain Points & Solutions
 
 ### **1️⃣ Centralized Dependency of Traditional OAuth → Decentralized OAuth Mechanism**
@@ -103,35 +168,7 @@ Bowhead Whale (also known as D OAuth) is a **decentralized OAuth infrastructure*
 - Set once, use across multiple services
 - Automatically validates user input
 
-## 📊 Workflows
 
-### Path 1: Service Provider Registration
-```
-Service Provider → Bowhead Whale Interface → Register Service
-                 → Enter service name, description, Redirect URL
-                 → Obtain clientId
-                 → Record to DOAuth_Service_AllowList
-```
-
-### Path 2: User D OAuth Login
-```
-User → Third-party service login button
-     → Redirect to Bowhead Whale OAuth page
-     → Wallet signature authorization
-     → Contract verifies if service is in whitelist
-     → Create/Update Auth_List
-     → Return access_token
-```
-
-### Path 3: Service Provider Accessing User Resources
-```
-Service Provider → HTTP GET Bowhead Whale API
-                 → Provide access_token
-                 → Contract executes seal_approve
-                 → check_policy verifies authorization
-                 → Return encrypted resource URL
-                 → Service provider decrypts using secret_key
-```
 
 ## 🔐 Security Features
 
