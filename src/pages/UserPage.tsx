@@ -18,12 +18,12 @@ import './css/UserPage.css'
 
 
 const suiClient = new SuiJsonRpcClient({
-	url: getFullnodeUrl('testnet'),
-	network: 'testnet',
+  url: getFullnodeUrl('testnet'),
+  network: 'testnet',
 }).$extend(
-	walrus({
-		wasmUrl: 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm',
-	}),
+  walrus({
+    wasmUrl: 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm',
+  }),
 );
 
 interface DataVaultWithItems {
@@ -42,6 +42,66 @@ interface DataVaultWithItems {
 }
 
 export default function UserPage() {
+  // 開發環境診斷
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      import('../utils/diagnoseEnoki').then(({ diagnoseEnokiSetup }) => {
+        diagnoseEnokiSetup();
+      });
+    }
+  }, []);
+
+  // OAuth callback 處理 - 偵測 URL hash 中的 id_token 並處理 popup 關閉
+  useEffect(() => {
+    const hash = window.location.hash;
+
+    // 檢查是否是 OAuth callback（URL 包含 id_token）
+    if (hash && hash.includes('id_token=')) {
+      console.log('UserPage: Detected OAuth callback with id_token');
+      console.log('window.opener exists:', !!window.opener);
+
+      // 如果是 popup 視窗，通知父視窗並關閉
+      if (window.opener && !window.opener.closed) {
+        try {
+          console.log('UserPage: This is a popup window, sending callback to opener');
+
+          // 將 OAuth 結果傳給父視窗
+          window.opener.postMessage(
+            {
+              type: 'enoki-oauth-callback',
+              hash: hash,
+              url: window.location.href,
+            },
+            window.location.origin
+          );
+
+          // 延遲關閉，確保訊息已傳遞
+          setTimeout(() => {
+            console.log('UserPage: Closing popup window');
+            window.close();
+          }, 300);
+
+          return; // 不繼續執行其他邏輯
+        } catch (e) {
+          console.error('Failed to communicate with opener:', e);
+          // 即使通訊失敗也嘗試關閉
+          setTimeout(() => window.close(), 300);
+          return;
+        }
+      } else {
+        // 不是 popup，這是正常的頁面導航
+        console.log('UserPage: Not a popup, cleaning up URL hash');
+
+        // 清理 URL hash（已經在 /bowheadwhale/user，只需要移除 hash）
+        if (window.history.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+
+        // 繼續正常的頁面邏輯
+      }
+    }
+  }, []);
+
   useEffect(() => {
     document.body.classList.add('page-container-active')
     return () => {
@@ -77,13 +137,13 @@ export default function UserPage() {
       throw new Error(`Failed to sign message: ${err?.message || 'Unknown error'}`)
     }
   }
-  
+
   // State
   const [vaults, setVaults] = useState<DataVaultWithItems[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('')
-  
+
   // UI State
   const [showCreateVaultModal, setShowCreateVaultModal] = useState(false)
   const [showAddItemModal, setShowAddItemModal] = useState(false)
@@ -110,13 +170,13 @@ export default function UserPage() {
     fileName?: string
   } | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
-  
+
   // Update form states
   const [updateItemContent, setUpdateItemContent] = useState('')
   const [updateItemType, setUpdateItemType] = useState<'text' | 'image'>('text')
   const [updateSelectedImage, setUpdateSelectedImage] = useState<File | null>(null)
   const [updateImagePreview, setUpdateImagePreview] = useState<string | null>(null)
-  
+
   // Form states
   const [newVaultName, setNewVaultName] = useState('')
   const [newItemName, setNewItemName] = useState('')
@@ -124,13 +184,13 @@ export default function UserPage() {
   const [newItemType, setNewItemType] = useState<'text' | 'image'>('text')
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
-  
+
   // Basic info form states (for first-time users)
   const [showBasicInfoForm, setShowBasicInfoForm] = useState(false)
   const [basicName, setBasicName] = useState('')
   const [basicEmail, setBasicEmail] = useState('')
   const [basicGender, setBasicGender] = useState('')
-  
+
   // Basic info modal states (for editing existing basic info)
   const [basicInfoModalData, setBasicInfoModalData] = useState<{
     name: string
@@ -147,7 +207,7 @@ export default function UserPage() {
 
     try {
       setStatus('Loading your data vaults...')
-      
+
       // Get all DataVaultCap objects
       const vaultCaps = await contractService.getUserObjectsByType<{
         objectId: string
@@ -273,7 +333,7 @@ export default function UserPage() {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         const fetchedVaults = await fetchUserVaults()
         console.log(`Fetch attempt ${attempt}/${maxRetries}, Vaults:`, fetchedVaults)
-        
+
         // Use the returned data directly instead of state
         if (fetchedVaults && fetchedVaults.length > 0) {
           vault = fetchedVaults.find(v => v.groupName === newVaultName.trim())
@@ -288,7 +348,7 @@ export default function UserPage() {
       setStatus('✅ Category created successfully!')
       setShowCreateVaultModal(false)
       setNewVaultName('')
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -411,7 +471,7 @@ export default function UserPage() {
         deletable: true,
         epochs: 3,
       })
-      
+
       console.log('Upload result:', { blobId, blobObjectId })
 
       // Generate nonce
@@ -434,7 +494,7 @@ export default function UserPage() {
       })
 
       console.log('Item creation result:', result)
-      
+
       // Store blobObjectId mapping in localStorage for deletion support
       // Key: itemId, Value: blobObjectId
       if (blobObjectId) {
@@ -455,7 +515,7 @@ export default function UserPage() {
       setSelectedImage(null)
       setImagePreview(null)
       setSelectedVault(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -493,7 +553,7 @@ export default function UserPage() {
       // Step 2: Get encrypted blob from Walrus via API
       setStatus('Downloading encrypted data from Walrus...')
       console.log('Reading blob from Walrus, Blob ID:', itemInfo.value)
-      
+
       const { data: encryptedBlob } = await walrusApiService.readFromWalrus(itemInfo.value)
       console.log('Downloaded encrypted blob, size:', encryptedBlob.length)
 
@@ -504,17 +564,17 @@ export default function UserPage() {
 
       // Step 4: Check vault ownership and find ReadOnlyCap
       setStatus('Checking access permissions...')
-      
+
       const vaultInfo = await contractService.getDataVaultInfo(suiClient, vaultId)
       if (!vaultInfo) {
         throw new Error('Vault not found')
       }
-      
+
       // Check if current user is the owner
       if (vaultInfo.owner !== currentAccount.address) {
         throw new Error('You are not the owner of this vault')
       }
-      
+
       // Find ReadOnlyCap for this vault owned by the user
       setStatus('Finding access capability...')
 
@@ -551,9 +611,9 @@ export default function UserPage() {
       // } else {
       //   console.log('Address already in allow list, skipping add')
       // }
-      
+
       setStatus('Creating session key (please sign message)...')
-      
+
       const newSessionKey = await SessionKey.create({
         address: currentAccount.address,
         packageId: SEAL_PACKAGE_ID,
@@ -570,7 +630,7 @@ export default function UserPage() {
 
       // Step 6: Decrypt using SealService (参考 SealTest.tsx handleManualDecrypt)
       setStatus('Decrypting content...')
-      
+
       console.log('Decryption parameters:', {
         encryptedBlobLength: encryptedBlob.length,
         sealId: sealId,
@@ -605,7 +665,7 @@ export default function UserPage() {
       })
 
       setStatus('✅ Content loaded successfully!')
-      
+
     } catch (err: any) {
       console.error('View item error:', err)
       const errorMsg = err?.message || err?.toString() || 'Failed to load item'
@@ -660,10 +720,10 @@ export default function UserPage() {
           // Try to get blobObjectId from localStorage
           const storedBlobObjectId = localStorage.getItem(`blobObjectId_${selectedItem.itemId}`)
           const blobObjectId = storedBlobObjectId || itemInfo.value
-          
+
           // Check if it's a valid Sui Object ID (starts with 0x and 64 hex chars)
           const isSuiObjectId = /^0x[a-fA-F0-9]{64}$/.test(blobObjectId)
-          
+
           if (isSuiObjectId) {
             await walrusApiService.deleteBlob(blobObjectId)
             console.log('Old blob deleted from Walrus using blobObjectId')
@@ -684,7 +744,7 @@ export default function UserPage() {
       setShowViewItemModal(false)
       setSelectedItem(null)
       setViewingContent(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -700,7 +760,7 @@ export default function UserPage() {
   // Open update modal
   const handleOpenUpdateModal = () => {
     if (!viewingContent) return
-    
+
     setUpdateItemType(viewingContent.type)
     if (viewingContent.type === 'text') {
       setUpdateItemContent(viewingContent.content)
@@ -780,42 +840,42 @@ export default function UserPage() {
           content: updateItemContent.trim(),
           updatedAt: new Date().toISOString(),
         }
-        } else {
-          // Prepare image content
-          setStatus('Processing image...')
-          
-          if (updateSelectedImage) {
-            // New image selected
-            const imageBase64 = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader()
-              reader.onloadend = () => {
-                const base64String = reader.result as string
-                const base64Data = base64String.split(',')[1]
-                resolve(base64Data)
-              }
-              reader.onerror = reject
-              reader.readAsDataURL(updateSelectedImage)
-            })
+      } else {
+        // Prepare image content
+        setStatus('Processing image...')
 
-            contentData = {
-              type: 'image',
-              content: imageBase64,
-              mimeType: updateSelectedImage.type,
-              fileName: updateSelectedImage.name,
-              fileSize: updateSelectedImage.size,
-              updatedAt: new Date().toISOString(),
+        if (updateSelectedImage) {
+          // New image selected
+          const imageBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onloadend = () => {
+              const base64String = reader.result as string
+              const base64Data = base64String.split(',')[1]
+              resolve(base64Data)
             }
-          } else {
-            // Keep existing image (updateItemContent already contains the base64)
-            contentData = {
-              type: 'image',
-              content: updateItemContent,
-              mimeType: viewingContent?.mimeType,
-              fileName: viewingContent?.fileName,
-              updatedAt: new Date().toISOString(),
-            }
+            reader.onerror = reject
+            reader.readAsDataURL(updateSelectedImage)
+          })
+
+          contentData = {
+            type: 'image',
+            content: imageBase64,
+            mimeType: updateSelectedImage.type,
+            fileName: updateSelectedImage.name,
+            fileSize: updateSelectedImage.size,
+            updatedAt: new Date().toISOString(),
+          }
+        } else {
+          // Keep existing image (updateItemContent already contains the base64)
+          contentData = {
+            type: 'image',
+            content: updateItemContent,
+            mimeType: viewingContent?.mimeType,
+            fileName: viewingContent?.fileName,
+            updatedAt: new Date().toISOString(),
           }
         }
+      }
 
       const contentJson = JSON.stringify(contentData, null, 2)
       const contentBytes = new TextEncoder().encode(contentJson)
@@ -832,7 +892,7 @@ export default function UserPage() {
         deletable: true,
         epochs: 3,
       })
-      
+
       console.log('Update upload result:', { newBlobId, newBlobObjectId })
 
       // Get old blobObjectId BEFORE updating (so we can delete it later)
@@ -853,7 +913,7 @@ export default function UserPage() {
       })
 
       console.log('Item update result:', result)
-      
+
       // Store new blobObjectId mapping (AFTER getting old one)
       if (newBlobObjectId) {
         localStorage.setItem(`blobObjectId_${selectedItem.itemId}`, newBlobObjectId)
@@ -865,10 +925,10 @@ export default function UserPage() {
         if (itemInfo.value && itemInfo.value !== newBlobId) {
           // Use the old blobObjectId we saved before updating
           const blobObjectIdToDelete = oldBlobObjectId || itemInfo.value
-          
+
           // Check if it's a valid Sui Object ID
           const isSuiObjectId = /^0x[a-fA-F0-9]{64}$/.test(blobObjectIdToDelete)
-          
+
           if (isSuiObjectId && oldBlobObjectId) {
             // Only delete if we have a valid old blobObjectId
             await walrusApiService.deleteBlob(blobObjectIdToDelete)
@@ -888,15 +948,15 @@ export default function UserPage() {
       setUpdateItemType('text')
       setUpdateSelectedImage(null)
       setUpdateImagePreview(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
-      
+
       // Wait a bit for the new blob to be distributed to aggregator before trying to read it
       // Note: This is a workaround - in production, you might want to poll or use a better approach
       setStatus('Waiting for blob distribution...')
       await new Promise(resolve => setTimeout(resolve, 2000)) // Wait 2 seconds
-      
+
       // Try to reload content, but don't fail if it's not ready yet
       if (selectedItem) {
         try {
@@ -955,7 +1015,7 @@ export default function UserPage() {
       setStatus('✅ Vault deleted successfully!')
       setShowDeleteVaultConfirm(false)
       setSelectedVaultForDelete(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -1208,17 +1268,17 @@ export default function UserPage() {
       // Wait for transaction to be indexed on chain
       setStatus('Waiting for transaction to be indexed...')
       await new Promise(resolve => setTimeout(resolve, 2000)) // Wait 2 seconds
-      
+
       // Retry fetching vaults with timeout
       setStatus('Fetching vault information...')
       let vault: DataVaultWithItems | undefined = undefined
       const maxRetries = 5
       const retryDelay = 2000 // 2 seconds
-      
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         const fetchedVaults = await fetchUserVaults()
         console.log(`Fetch attempt ${attempt}/${maxRetries}, Vaults:`, fetchedVaults)
-        
+
         // Use the returned data directly instead of state
         if (fetchedVaults && fetchedVaults.length > 0) {
           vault = fetchedVaults.find(v => v.groupName === 'Basic')
@@ -1227,14 +1287,14 @@ export default function UserPage() {
             break
           }
         }
-        
+
         if (attempt < maxRetries) {
           console.log(`Vault not found yet, waiting ${retryDelay}ms before retry...`)
           setStatus(`Waiting for vault to be available... (${attempt}/${maxRetries})`)
           await new Promise(resolve => setTimeout(resolve, retryDelay))
         }
       }
-      
+
       if (!vault) {
         throw new Error('Vault not found after multiple attempts. Please refresh the page and try again.')
       }
@@ -1304,7 +1364,7 @@ export default function UserPage() {
       setBasicName('')
       setBasicEmail('')
       setBasicGender('')
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -1461,7 +1521,7 @@ export default function UserPage() {
                         <span className="vault-item-count">
                           {vault.items.length} {vault.items.length === 1 ? 'item' : 'items'}
                         </span>
-            </div>
+                      </div>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                         <button
                           onClick={() => {
@@ -1483,8 +1543,8 @@ export default function UserPage() {
                             setShowDeleteVaultConfirm(true)
                           }}
                           className="btn btn-secondary"
-                          style={{ 
-                            fontSize: '0.875rem', 
+                          style={{
+                            fontSize: '0.875rem',
                             padding: '0.5rem 1rem',
                             backgroundColor: 'rgba(255, 59, 48, 0.1)',
                             color: '#ff3b30',
@@ -1495,12 +1555,12 @@ export default function UserPage() {
                           🗑️
                         </button>
                       </div>
-            </div>
+                    </div>
 
                     {vault.items.length === 0 ? (
                       <div className="vault-empty">
                         <p>This category has no data yet</p>
-            <button
+                        <button
                           onClick={() => {
                             setSelectedVault(vault.vaultId)
                             setShowAddItemModal(true)
@@ -1509,7 +1569,7 @@ export default function UserPage() {
                           style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}
                         >
                           Add First Item
-            </button>
+                        </button>
                       </div>
                     ) : (
                       <div className="vault-items">
@@ -1594,15 +1654,15 @@ export default function UserPage() {
             )}
 
             {/* Status and error messages */}
-        {status && (
-          <div className="status-box" style={{ marginTop: '2rem' }}>
-            {status}
-          </div>
-        )}
+            {status && (
+              <div className="status-box" style={{ marginTop: '2rem' }}>
+                {status}
+              </div>
+            )}
 
-        {error && (
-          <div className="error-box" style={{ marginTop: '2rem' }}>
-            {error}
+            {error && (
+              <div className="error-box" style={{ marginTop: '2rem' }}>
+                {error}
               </div>
             )}
           </>
@@ -1887,7 +1947,7 @@ export default function UserPage() {
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
                     className="btn btn-secondary"
-                    style={{ 
+                    style={{
                       backgroundColor: '#ff3b30',
                       color: 'white',
                       border: 'none'
@@ -2075,7 +2135,7 @@ export default function UserPage() {
                   <button
                     onClick={handleDeleteItem}
                     className="btn btn-primary"
-                    style={{ 
+                    style={{
                       flex: 1,
                       backgroundColor: '#ff3b30',
                       color: 'white',
@@ -2213,7 +2273,7 @@ export default function UserPage() {
                   <button
                     onClick={handleDeleteVault}
                     className="btn btn-primary"
-                    style={{ 
+                    style={{
                       flex: 1,
                       backgroundColor: '#ff3b30',
                       color: 'white',

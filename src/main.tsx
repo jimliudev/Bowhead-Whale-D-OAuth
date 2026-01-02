@@ -6,6 +6,7 @@ import { getFullnodeUrl } from '@mysten/sui/client'
 import App from './App'
 import './index.css'
 import '@mysten/dapp-kit/dist/index.css'
+import EnokiWalletRegistration from './services/EnokiWalletRegistration'
 
 // 創建 QueryClient
 const queryClient = new QueryClient()
@@ -24,6 +25,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         networks={networkConfig}
         defaultNetwork="testnet"
       >
+        <EnokiWalletRegistration />
         <WalletProvider autoConnect>
           <App />
         </WalletProvider>

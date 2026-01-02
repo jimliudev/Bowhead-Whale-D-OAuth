@@ -10,6 +10,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@mysten/enoki": "^0.10.0",
     "@mysten/dapp-kit": "^0.16.11",
     "@mysten/seal": "^0.9.3",
     "@mysten/sui": "^1.44.0",
