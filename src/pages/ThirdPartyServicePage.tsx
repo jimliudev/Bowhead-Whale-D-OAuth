@@ -1,27 +1,21 @@
-import { useState, useEffect, useMemo } from 'react'
-import {
-  useCurrentAccount,
-  useSignAndExecuteTransaction,
-} from '@mysten/dapp-kit'
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
+import { useState, useEffect } from 'react'
+import { useTransactionExecution } from '../hooks/useTransactionExecution'
 import { contractService } from '../services/contractService'
 import Header from '../components/Header'
 import './css/PageLayout.css'
 import './css/ThirdPartyServicePage.css'
 
 export default function ThirdPartyServicePage() {
-  const currentAccount = useCurrentAccount()
-  const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction()
-  
+  // 使用新的 transaction execution hook
+  const {
+    executeTransaction,
+    isUsingZkLogin,
+    currentAccount,
+    suiClient,
+  } = useTransactionExecution()
+
   const isConnected = Boolean(currentAccount)
 
-  const suiClient = useMemo(() => {
-    return new SuiClient({
-      url: getFullnodeUrl('testnet'),
-      network: 'testnet',
-    })
-  }, [])
-  
   // 表单状态
   const [clientId, setClientId] = useState('')
   const [redirectUrl, setRedirectUrl] = useState('')
@@ -29,7 +23,7 @@ export default function ThirdPartyServicePage() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('')
   const [serviceId, setServiceId] = useState<string | null>(null)
-  
+
   // 已注册的服务信息
   const [registeredService, setRegisteredService] = useState<{
     objectId: string
@@ -93,7 +87,7 @@ export default function ThirdPartyServicePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!isConnected || !currentAccount) {
       setError('Please connect your wallet first')
       return
@@ -134,21 +128,20 @@ export default function ThirdPartyServicePage() {
         redirectUrl: redirectUrl.trim(),
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Service registration result:', result)
 
       // Extract Service ID using contractService
       const resultAny = result as any
       const { created } = contractService.extractObjectIds(resultAny, 'OAuthService')
-      
+
       if (created.length > 0) {
         const serviceIdValue = created[0]
         setServiceId(serviceIdValue)
         setStatus(`✅ Service registered successfully!\nService ID: ${serviceIdValue}\nTransaction: ${result.digest}\nView on: https://suiexplorer.com/txblock/${result.digest}?network=testnet`)
-        
+
         // 更新已注册服务信息
         setRegisteredService({
           objectId: serviceIdValue,
@@ -214,13 +207,51 @@ export default function ThirdPartyServicePage() {
           <>
             <div className="success-box">
               <h3>Registered Service</h3>
-                <div style={{ marginTop: '1rem' }}>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
-                      <strong>Service ID:</strong>
-                    </p>
+              <div style={{ marginTop: '1rem' }}>
+                <div style={{ marginBottom: '1rem' }}>
+                  <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
+                    <strong>Service ID:</strong>
+                  </p>
+                  <code style={{
+                    display: 'block',
+                    padding: '0.75rem',
+                    background: '#ffffff',
+                    border: '1px solid #d2d2d7',
+                    borderRadius: '8px',
+                    wordBreak: 'break-all',
+                    fontSize: '0.8125rem',
+                  }}>
+                    {registeredService.objectId}
+                  </code>
+                </div>
+
+                <div style={{ marginBottom: '1rem' }}>
+                  <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
+                    <strong>Client ID:</strong>
+                  </p>
+                  <p style={{ fontSize: '0.9375rem' }}>{registeredService.clientId}</p>
+                </div>
+
+                <div style={{ marginBottom: '1rem' }}>
+                  <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
+                    <strong>Redirect URL:</strong>
+                  </p>
+                  <p style={{ fontSize: '0.9375rem', wordBreak: 'break-all' }}>{registeredService.redirectUrl}</p>
+                </div>
+
+                <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #bbf7d0' }}>
+                  <p style={{ marginBottom: '0.75rem', fontSize: '0.9375rem', fontWeight: 500 }}>
+                    OAuth Authorization Link:
+                  </p>
+                  <div style={{
+                    display: 'flex',
+                    gap: '0.5rem',
+                    alignItems: 'center',
+                    flexWrap: 'wrap'
+                  }}>
                     <code style={{
-                      display: 'block',
+                      flex: 1,
+                      minWidth: '200px',
                       padding: '0.75rem',
                       background: '#ffffff',
                       border: '1px solid #d2d2d7',
@@ -228,65 +259,27 @@ export default function ThirdPartyServicePage() {
                       wordBreak: 'break-all',
                       fontSize: '0.8125rem',
                     }}>
-                      {registeredService.objectId}
+                      {window.location.origin}/bowheadwhale/doauth_page?service={registeredService.serviceId}
                     </code>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        const link = `${window.location.origin}/bowheadwhale/doauth_page?service=${registeredService.serviceId}`
+                        navigator.clipboard.writeText(link)
+                        alert('Authorization link copied to clipboard!')
+                      }}
+                      style={{ flexShrink: 0 }}
+                    >
+                      Copy Link
+                    </button>
                   </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
-                      <strong>Client ID:</strong>
-                    </p>
-                    <p style={{ fontSize: '0.9375rem' }}>{registeredService.clientId}</p>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <p style={{ marginBottom: '0.5rem', fontWeight: 500 }}>
-                      <strong>Redirect URL:</strong>
-                    </p>
-                    <p style={{ fontSize: '0.9375rem', wordBreak: 'break-all' }}>{registeredService.redirectUrl}</p>
-                  </div>
-                  
-                  <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #bbf7d0' }}>
-                    <p style={{ marginBottom: '0.75rem', fontSize: '0.9375rem', fontWeight: 500 }}>
-                      OAuth Authorization Link:
-                    </p>
-                    <div style={{ 
-                      display: 'flex', 
-                      gap: '0.5rem', 
-                      alignItems: 'center',
-                      flexWrap: 'wrap'
-                    }}>
-                      <code style={{ 
-                        flex: 1,
-                        minWidth: '200px',
-                        padding: '0.75rem',
-                        background: '#ffffff',
-                        border: '1px solid #d2d2d7',
-                        borderRadius: '8px',
-                        wordBreak: 'break-all',
-                        fontSize: '0.8125rem',
-                      }}>
-                        {window.location.origin}/bowheadwhale/doauth_page?service={registeredService.serviceId}
-                      </code>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => {
-                          const link = `${window.location.origin}/bowheadwhale/doauth_page?service=${registeredService.serviceId}`
-                          navigator.clipboard.writeText(link)
-                          alert('Authorization link copied to clipboard!')
-                        }}
-                        style={{ flexShrink: 0 }}
-                      >
-                        Copy Link
-                      </button>
-                    </div>
-                    <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: '#6e6e73' }}>
-                      Share this link with users to authorize access to your service.
-                    </p>
-                  </div>
+                  <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: '#6e6e73' }}>
+                    Share this link with users to authorize access to your service.
+                  </p>
                 </div>
               </div>
-            </>
+            </div>
+          </>
         ) : (
           <>
             <div className="info-box">
