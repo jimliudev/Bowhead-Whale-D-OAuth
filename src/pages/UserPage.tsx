@@ -1,30 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
-import {
-  useCurrentAccount,
-  useSignAndExecuteTransaction,
-  useCurrentWallet,
-} from '@mysten/dapp-kit'
-import { getFullnodeUrl } from '@mysten/sui/client'
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
-import { walrus } from '@mysten/walrus'
 import { SessionKey } from '@mysten/seal'
 import { SealService } from '../services/sealService'
 import { contractService } from '../services/contractService'
 import { walrusApiService } from '../services/walrusApiService'
 import { SEAL_PACKAGE_ID } from '../config'
+import { useTransactionExecution } from '../hooks/useTransactionExecution'
 import Header from '../components/Header'
 import './css/PageLayout.css'
 import './css/UserPage.css'
-
-
-const suiClient = new SuiJsonRpcClient({
-	url: getFullnodeUrl('testnet'),
-	network: 'testnet',
-}).$extend(
-	walrus({
-		wasmUrl: 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm',
-	}),
-);
 
 interface DataVaultWithItems {
   vaultId: string
@@ -42,6 +25,66 @@ interface DataVaultWithItems {
 }
 
 export default function UserPage() {
+  // 開發環境診斷
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      import('../utils/diagnoseEnoki').then(({ diagnoseEnokiSetup }) => {
+        diagnoseEnokiSetup();
+      });
+    }
+  }, []);
+
+  // OAuth callback 處理 - 偵測 URL hash 中的 id_token 並處理 popup 關閉
+  useEffect(() => {
+    const hash = window.location.hash;
+
+    // 檢查是否是 OAuth callback（URL 包含 id_token）
+    if (hash && hash.includes('id_token=')) {
+      console.log('UserPage: Detected OAuth callback with id_token');
+      console.log('window.opener exists:', !!window.opener);
+
+      // 如果是 popup 視窗，通知父視窗並關閉
+      if (window.opener && !window.opener.closed) {
+        try {
+          console.log('UserPage: This is a popup window, sending callback to opener');
+
+          // 將 OAuth 結果傳給父視窗
+          window.opener.postMessage(
+            {
+              type: 'enoki-oauth-callback',
+              hash: hash,
+              url: window.location.href,
+            },
+            window.location.origin
+          );
+
+          // 延遲關閉，確保訊息已傳遞
+          setTimeout(() => {
+            console.log('UserPage: Closing popup window');
+            window.close();
+          }, 300);
+
+          return; // 不繼續執行其他邏輯
+        } catch (e) {
+          console.error('Failed to communicate with opener:', e);
+          // 即使通訊失敗也嘗試關閉
+          setTimeout(() => window.close(), 300);
+          return;
+        }
+      } else {
+        // 不是 popup，這是正常的頁面導航
+        console.log('UserPage: Not a popup, cleaning up URL hash');
+
+        // 清理 URL hash（已經在 /bowheadwhale/user，只需要移除 hash）
+        if (window.history.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+
+        // 繼續正常的頁面邏輯
+      }
+    }
+  }, []);
+
   useEffect(() => {
     document.body.classList.add('page-container-active')
     return () => {
@@ -49,41 +92,25 @@ export default function UserPage() {
     }
   }, [])
 
-  const currentAccount = useCurrentAccount()
-  const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction()
-  const { currentWallet } = useCurrentWallet()
+  // 使用新的 transaction execution hook
+  const {
+    executeTransaction,
+    signPersonalMessage,
+    isUsingZkLogin,
+    currentAccount,
+    currentWallet,
+    suiClient,
+  } = useTransactionExecution()
+
   const isConnected = Boolean(currentAccount)
   const sealService = useMemo(() => new SealService(), [])
 
-  // Sign personal message for SessionKey
-  const signPersonalMessage = async (message: Uint8Array): Promise<string> => {
-    if (!currentWallet || !currentAccount) {
-      throw new Error('Wallet not connected')
-    }
-
-    try {
-      // Use wallet's signPersonalMessage feature
-      const signPersonalMessageFeature = currentWallet.features['sui:signPersonalMessage']
-      if (signPersonalMessageFeature) {
-        const result = await signPersonalMessageFeature.signPersonalMessage({
-          message,
-          account: currentAccount,
-        })
-        return result.signature
-      }
-      throw new Error('Wallet does not support signPersonalMessage')
-    } catch (err: any) {
-      console.error('Sign personal message error:', err)
-      throw new Error(`Failed to sign message: ${err?.message || 'Unknown error'}`)
-    }
-  }
-  
   // State
   const [vaults, setVaults] = useState<DataVaultWithItems[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('')
-  
+
   // UI State
   const [showCreateVaultModal, setShowCreateVaultModal] = useState(false)
   const [showAddItemModal, setShowAddItemModal] = useState(false)
@@ -110,13 +137,13 @@ export default function UserPage() {
     fileName?: string
   } | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
-  
+
   // Update form states
   const [updateItemContent, setUpdateItemContent] = useState('')
   const [updateItemType, setUpdateItemType] = useState<'text' | 'image'>('text')
   const [updateSelectedImage, setUpdateSelectedImage] = useState<File | null>(null)
   const [updateImagePreview, setUpdateImagePreview] = useState<string | null>(null)
-  
+
   // Form states
   const [newVaultName, setNewVaultName] = useState('')
   const [newItemName, setNewItemName] = useState('')
@@ -124,13 +151,13 @@ export default function UserPage() {
   const [newItemType, setNewItemType] = useState<'text' | 'image'>('text')
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
-  
+
   // Basic info form states (for first-time users)
   const [showBasicInfoForm, setShowBasicInfoForm] = useState(false)
   const [basicName, setBasicName] = useState('')
   const [basicEmail, setBasicEmail] = useState('')
   const [basicGender, setBasicGender] = useState('')
-  
+
   // Basic info modal states (for editing existing basic info)
   const [basicInfoModalData, setBasicInfoModalData] = useState<{
     name: string
@@ -147,7 +174,7 @@ export default function UserPage() {
 
     try {
       setStatus('Loading your data vaults...')
-      
+
       // Get all DataVaultCap objects
       const vaultCaps = await contractService.getUserObjectsByType<{
         objectId: string
@@ -263,9 +290,8 @@ export default function UserPage() {
         groupName: newVaultName.trim(),
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       const maxRetries = 5
       const retryDelay = 2000 // 2 seconds
@@ -273,7 +299,7 @@ export default function UserPage() {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         const fetchedVaults = await fetchUserVaults()
         console.log(`Fetch attempt ${attempt}/${maxRetries}, Vaults:`, fetchedVaults)
-        
+
         // Use the returned data directly instead of state
         if (fetchedVaults && fetchedVaults.length > 0) {
           vault = fetchedVaults.find(v => v.groupName === newVaultName.trim())
@@ -288,7 +314,7 @@ export default function UserPage() {
       setStatus('✅ Category created successfully!')
       setShowCreateVaultModal(false)
       setNewVaultName('')
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -411,7 +437,7 @@ export default function UserPage() {
         deletable: true,
         epochs: 3,
       })
-      
+
       console.log('Upload result:', { blobId, blobObjectId })
 
       // Generate nonce
@@ -429,12 +455,11 @@ export default function UserPage() {
         nonce,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Item creation result:', result)
-      
+
       // Store blobObjectId mapping in localStorage for deletion support
       // Key: itemId, Value: blobObjectId
       if (blobObjectId) {
@@ -455,7 +480,7 @@ export default function UserPage() {
       setSelectedImage(null)
       setImagePreview(null)
       setSelectedVault(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -493,7 +518,7 @@ export default function UserPage() {
       // Step 2: Get encrypted blob from Walrus via API
       setStatus('Downloading encrypted data from Walrus...')
       console.log('Reading blob from Walrus, Blob ID:', itemInfo.value)
-      
+
       const { data: encryptedBlob } = await walrusApiService.readFromWalrus(itemInfo.value)
       console.log('Downloaded encrypted blob, size:', encryptedBlob.length)
 
@@ -504,17 +529,17 @@ export default function UserPage() {
 
       // Step 4: Check vault ownership and find ReadOnlyCap
       setStatus('Checking access permissions...')
-      
+
       const vaultInfo = await contractService.getDataVaultInfo(suiClient, vaultId)
       if (!vaultInfo) {
         throw new Error('Vault not found')
       }
-      
+
       // Check if current user is the owner
       if (vaultInfo.owner !== currentAccount.address) {
         throw new Error('You are not the owner of this vault')
       }
-      
+
       // Find ReadOnlyCap for this vault owned by the user
       setStatus('Finding access capability...')
 
@@ -551,9 +576,9 @@ export default function UserPage() {
       // } else {
       //   console.log('Address already in allow list, skipping add')
       // }
-      
+
       setStatus('Creating session key (please sign message)...')
-      
+
       const newSessionKey = await SessionKey.create({
         address: currentAccount.address,
         packageId: SEAL_PACKAGE_ID,
@@ -570,7 +595,7 @@ export default function UserPage() {
 
       // Step 6: Decrypt using SealService (参考 SealTest.tsx handleManualDecrypt)
       setStatus('Decrypting content...')
-      
+
       console.log('Decryption parameters:', {
         encryptedBlobLength: encryptedBlob.length,
         sealId: sealId,
@@ -605,7 +630,7 @@ export default function UserPage() {
       })
 
       setStatus('✅ Content loaded successfully!')
-      
+
     } catch (err: any) {
       console.error('View item error:', err)
       const errorMsg = err?.message || err?.toString() || 'Failed to load item'
@@ -647,9 +672,8 @@ export default function UserPage() {
         itemId: selectedItem.itemId,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Item deletion result:', result)
 
@@ -660,10 +684,10 @@ export default function UserPage() {
           // Try to get blobObjectId from localStorage
           const storedBlobObjectId = localStorage.getItem(`blobObjectId_${selectedItem.itemId}`)
           const blobObjectId = storedBlobObjectId || itemInfo.value
-          
+
           // Check if it's a valid Sui Object ID (starts with 0x and 64 hex chars)
           const isSuiObjectId = /^0x[a-fA-F0-9]{64}$/.test(blobObjectId)
-          
+
           if (isSuiObjectId) {
             await walrusApiService.deleteBlob(blobObjectId)
             console.log('Old blob deleted from Walrus using blobObjectId')
@@ -684,7 +708,7 @@ export default function UserPage() {
       setShowViewItemModal(false)
       setSelectedItem(null)
       setViewingContent(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -700,7 +724,7 @@ export default function UserPage() {
   // Open update modal
   const handleOpenUpdateModal = () => {
     if (!viewingContent) return
-    
+
     setUpdateItemType(viewingContent.type)
     if (viewingContent.type === 'text') {
       setUpdateItemContent(viewingContent.content)
@@ -780,42 +804,42 @@ export default function UserPage() {
           content: updateItemContent.trim(),
           updatedAt: new Date().toISOString(),
         }
-        } else {
-          // Prepare image content
-          setStatus('Processing image...')
-          
-          if (updateSelectedImage) {
-            // New image selected
-            const imageBase64 = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader()
-              reader.onloadend = () => {
-                const base64String = reader.result as string
-                const base64Data = base64String.split(',')[1]
-                resolve(base64Data)
-              }
-              reader.onerror = reject
-              reader.readAsDataURL(updateSelectedImage)
-            })
+      } else {
+        // Prepare image content
+        setStatus('Processing image...')
 
-            contentData = {
-              type: 'image',
-              content: imageBase64,
-              mimeType: updateSelectedImage.type,
-              fileName: updateSelectedImage.name,
-              fileSize: updateSelectedImage.size,
-              updatedAt: new Date().toISOString(),
+        if (updateSelectedImage) {
+          // New image selected
+          const imageBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onloadend = () => {
+              const base64String = reader.result as string
+              const base64Data = base64String.split(',')[1]
+              resolve(base64Data)
             }
-          } else {
-            // Keep existing image (updateItemContent already contains the base64)
-            contentData = {
-              type: 'image',
-              content: updateItemContent,
-              mimeType: viewingContent?.mimeType,
-              fileName: viewingContent?.fileName,
-              updatedAt: new Date().toISOString(),
-            }
+            reader.onerror = reject
+            reader.readAsDataURL(updateSelectedImage)
+          })
+
+          contentData = {
+            type: 'image',
+            content: imageBase64,
+            mimeType: updateSelectedImage.type,
+            fileName: updateSelectedImage.name,
+            fileSize: updateSelectedImage.size,
+            updatedAt: new Date().toISOString(),
+          }
+        } else {
+          // Keep existing image (updateItemContent already contains the base64)
+          contentData = {
+            type: 'image',
+            content: updateItemContent,
+            mimeType: viewingContent?.mimeType,
+            fileName: viewingContent?.fileName,
+            updatedAt: new Date().toISOString(),
           }
         }
+      }
 
       const contentJson = JSON.stringify(contentData, null, 2)
       const contentBytes = new TextEncoder().encode(contentJson)
@@ -832,7 +856,7 @@ export default function UserPage() {
         deletable: true,
         epochs: 3,
       })
-      
+
       console.log('Update upload result:', { newBlobId, newBlobObjectId })
 
       // Get old blobObjectId BEFORE updating (so we can delete it later)
@@ -848,12 +872,11 @@ export default function UserPage() {
         newBlobId,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Item update result:', result)
-      
+
       // Store new blobObjectId mapping (AFTER getting old one)
       if (newBlobObjectId) {
         localStorage.setItem(`blobObjectId_${selectedItem.itemId}`, newBlobObjectId)
@@ -865,10 +888,10 @@ export default function UserPage() {
         if (itemInfo.value && itemInfo.value !== newBlobId) {
           // Use the old blobObjectId we saved before updating
           const blobObjectIdToDelete = oldBlobObjectId || itemInfo.value
-          
+
           // Check if it's a valid Sui Object ID
           const isSuiObjectId = /^0x[a-fA-F0-9]{64}$/.test(blobObjectIdToDelete)
-          
+
           if (isSuiObjectId && oldBlobObjectId) {
             // Only delete if we have a valid old blobObjectId
             await walrusApiService.deleteBlob(blobObjectIdToDelete)
@@ -888,15 +911,15 @@ export default function UserPage() {
       setUpdateItemType('text')
       setUpdateSelectedImage(null)
       setUpdateImagePreview(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
-      
+
       // Wait a bit for the new blob to be distributed to aggregator before trying to read it
       // Note: This is a workaround - in production, you might want to poll or use a better approach
       setStatus('Waiting for blob distribution...')
       await new Promise(resolve => setTimeout(resolve, 2000)) // Wait 2 seconds
-      
+
       // Try to reload content, but don't fail if it's not ready yet
       if (selectedItem) {
         try {
@@ -946,16 +969,15 @@ export default function UserPage() {
         vaultId: selectedVaultForDelete.vaultId,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Vault deletion result:', result)
 
       setStatus('✅ Vault deleted successfully!')
       setShowDeleteVaultConfirm(false)
       setSelectedVaultForDelete(null)
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -1137,9 +1159,8 @@ export default function UserPage() {
         newBlobId,
       })
 
-      await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      await executeTransaction(tx)
 
       // Store new blobObjectId
       if (newBlobObjectId) {
@@ -1201,24 +1222,23 @@ export default function UserPage() {
         groupName: 'Basic',
       })
 
-      const vaultResult = await signAndExecuteTransaction({
-        transaction: vaultTx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const vaultResult = await executeTransaction(vaultTx)
 
       // Wait for transaction to be indexed on chain
       setStatus('Waiting for transaction to be indexed...')
       await new Promise(resolve => setTimeout(resolve, 2000)) // Wait 2 seconds
-      
+
       // Retry fetching vaults with timeout
       setStatus('Fetching vault information...')
       let vault: DataVaultWithItems | undefined = undefined
       const maxRetries = 5
       const retryDelay = 2000 // 2 seconds
-      
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         const fetchedVaults = await fetchUserVaults()
         console.log(`Fetch attempt ${attempt}/${maxRetries}, Vaults:`, fetchedVaults)
-        
+
         // Use the returned data directly instead of state
         if (fetchedVaults && fetchedVaults.length > 0) {
           vault = fetchedVaults.find(v => v.groupName === 'Basic')
@@ -1227,14 +1247,14 @@ export default function UserPage() {
             break
           }
         }
-        
+
         if (attempt < maxRetries) {
           console.log(`Vault not found yet, waiting ${retryDelay}ms before retry...`)
           setStatus(`Waiting for vault to be available... (${attempt}/${maxRetries})`)
           await new Promise(resolve => setTimeout(resolve, retryDelay))
         }
       }
-      
+
       if (!vault) {
         throw new Error('Vault not found after multiple attempts. Please refresh the page and try again.')
       }
@@ -1285,9 +1305,8 @@ export default function UserPage() {
         nonce,
       })
 
-      const itemResult = await signAndExecuteTransaction({
-        transaction: itemTx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const itemResult = await executeTransaction(itemTx)
 
       // Store blobObjectId mapping
       if (blobObjectId) {
@@ -1304,7 +1323,7 @@ export default function UserPage() {
       setBasicName('')
       setBasicEmail('')
       setBasicGender('')
-      
+
       // Refresh vaults list
       await fetchUserVaults()
     } catch (err: any) {
@@ -1319,28 +1338,58 @@ export default function UserPage() {
 
   return (
     <div className="page-container">
-      <Header
-        title="My Data"
-        backTo="/"
-        backLabel="Back"
-        rightLink={{
-          to: '/bowheadwhale/thirdparty-service',
-          label: 'Service Registration',
-        }}
-        onAccountClick={handleLoadBasicInfo}
-      />
+      <Header onAccountClick={handleLoadBasicInfo} />
 
       <div className="page-content">
-        {/* User Guide */}
-        <div className="info-box">
-          <h3>Registration Guide</h3>
-          <ul>
-            <li>Each category (DataVault) represents a group of related data items</li>
-            <li>Your data will be encrypted using <strong>Seal</strong> and stored on <strong>Walrus</strong> decentralized storage</li>
-            <li>Only you can access and view this information</li>
-            <li>After creating a category, you can add multiple data items to it</li>
-            <li>Currently, only text content is supported. Image support will be added in the future</li>
-          </ul>
+        {/* Hero Section */}
+        <div className="user-hero">
+          <div className="user-hero-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+              <path d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z" stroke="#4285f4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M9 22V12H15V22" stroke="#4285f4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h1 className="user-hero-title">雲端區塊鏈硬碟</h1>
+          <p className="user-hero-subtitle">Decentralized Cloud Storage on Blockchain</p>
+          <p className="user-hero-description">
+            使用 <strong>Seal 加密</strong> 和 <strong>Walrus 去中心化儲存</strong>，
+            將您的資料安全地儲存在區塊鏈上，只有您能存取
+          </p>
+        </div>
+
+        {/* Features */}
+        <div className="user-features">
+          <div className="user-feature-item">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="#34a853" strokeWidth="2" />
+              <path d="M12 6V12L16 14" stroke="#34a853" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <div>
+              <h4>永久儲存</h4>
+              <p>資料儲存在去中心化網路</p>
+            </div>
+          </div>
+          <div className="user-feature-item">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="11" width="18" height="11" rx="2" stroke="#fbbc04" strokeWidth="2" />
+              <path d="M7 11V7C7 5.67392 7.52678 4.40215 8.46447 3.46447C9.40215 2.52678 10.6739 2 12 2C13.3261 2 14.5979 2.52678 15.5355 3.46447C16.4732 4.40215 17 5.67392 17 7V11" stroke="#fbbc04" strokeWidth="2" />
+            </svg>
+            <div>
+              <h4>端到端加密</h4>
+              <p>Seal 技術保護您的隱私</p>
+            </div>
+          </div>
+          <div className="user-feature-item">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#ea4335" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M2 17L12 22L22 17" stroke="#ea4335" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M2 12L12 17L22 12" stroke="#ea4335" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <div>
+              <h4>完全掌控</h4>
+              <p>只有您能存取您的資料</p>
+            </div>
+          </div>
         </div>
 
         {!isConnected ? (
@@ -1461,7 +1510,7 @@ export default function UserPage() {
                         <span className="vault-item-count">
                           {vault.items.length} {vault.items.length === 1 ? 'item' : 'items'}
                         </span>
-            </div>
+                      </div>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                         <button
                           onClick={() => {
@@ -1483,8 +1532,8 @@ export default function UserPage() {
                             setShowDeleteVaultConfirm(true)
                           }}
                           className="btn btn-secondary"
-                          style={{ 
-                            fontSize: '0.875rem', 
+                          style={{
+                            fontSize: '0.875rem',
                             padding: '0.5rem 1rem',
                             backgroundColor: 'rgba(255, 59, 48, 0.1)',
                             color: '#ff3b30',
@@ -1495,12 +1544,12 @@ export default function UserPage() {
                           🗑️
                         </button>
                       </div>
-            </div>
+                    </div>
 
                     {vault.items.length === 0 ? (
                       <div className="vault-empty">
                         <p>This category has no data yet</p>
-            <button
+                        <button
                           onClick={() => {
                             setSelectedVault(vault.vaultId)
                             setShowAddItemModal(true)
@@ -1509,7 +1558,7 @@ export default function UserPage() {
                           style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}
                         >
                           Add First Item
-            </button>
+                        </button>
                       </div>
                     ) : (
                       <div className="vault-items">
@@ -1594,15 +1643,15 @@ export default function UserPage() {
             )}
 
             {/* Status and error messages */}
-        {status && (
-          <div className="status-box" style={{ marginTop: '2rem' }}>
-            {status}
-          </div>
-        )}
+            {status && (
+              <div className="status-box" style={{ marginTop: '2rem' }}>
+                {status}
+              </div>
+            )}
 
-        {error && (
-          <div className="error-box" style={{ marginTop: '2rem' }}>
-            {error}
+            {error && (
+              <div className="error-box" style={{ marginTop: '2rem' }}>
+                {error}
               </div>
             )}
           </>
@@ -1887,7 +1936,7 @@ export default function UserPage() {
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
                     className="btn btn-secondary"
-                    style={{ 
+                    style={{
                       backgroundColor: '#ff3b30',
                       color: 'white',
                       border: 'none'
@@ -2075,7 +2124,7 @@ export default function UserPage() {
                   <button
                     onClick={handleDeleteItem}
                     className="btn btn-primary"
-                    style={{ 
+                    style={{
                       flex: 1,
                       backgroundColor: '#ff3b30',
                       color: 'white',
@@ -2213,7 +2262,7 @@ export default function UserPage() {
                   <button
                     onClick={handleDeleteVault}
                     className="btn btn-primary"
-                    style={{ 
+                    style={{
                       flex: 1,
                       backgroundColor: '#ff3b30',
                       color: 'white',
