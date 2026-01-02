@@ -1338,28 +1338,58 @@ export default function UserPage() {
 
   return (
     <div className="page-container">
-      <Header
-        title="My Data"
-        backTo="/"
-        backLabel="Back"
-        rightLink={{
-          to: '/bowheadwhale/thirdparty-service',
-          label: 'Service Registration',
-        }}
-        onAccountClick={handleLoadBasicInfo}
-      />
+      <Header onAccountClick={handleLoadBasicInfo} />
 
       <div className="page-content">
-        {/* User Guide */}
-        <div className="info-box">
-          <h3>Registration Guide</h3>
-          <ul>
-            <li>Each category (DataVault) represents a group of related data items</li>
-            <li>Your data will be encrypted using <strong>Seal</strong> and stored on <strong>Walrus</strong> decentralized storage</li>
-            <li>Only you can access and view this information</li>
-            <li>After creating a category, you can add multiple data items to it</li>
-            <li>Currently, only text content is supported. Image support will be added in the future</li>
-          </ul>
+        {/* Hero Section */}
+        <div className="user-hero">
+          <div className="user-hero-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+              <path d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z" stroke="#4285f4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M9 22V12H15V22" stroke="#4285f4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h1 className="user-hero-title">雲端區塊鏈硬碟</h1>
+          <p className="user-hero-subtitle">Decentralized Cloud Storage on Blockchain</p>
+          <p className="user-hero-description">
+            使用 <strong>Seal 加密</strong> 和 <strong>Walrus 去中心化儲存</strong>，
+            將您的資料安全地儲存在區塊鏈上，只有您能存取
+          </p>
+        </div>
+
+        {/* Features */}
+        <div className="user-features">
+          <div className="user-feature-item">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="#34a853" strokeWidth="2" />
+              <path d="M12 6V12L16 14" stroke="#34a853" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <div>
+              <h4>永久儲存</h4>
+              <p>資料儲存在去中心化網路</p>
+            </div>
+          </div>
+          <div className="user-feature-item">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="11" width="18" height="11" rx="2" stroke="#fbbc04" strokeWidth="2" />
+              <path d="M7 11V7C7 5.67392 7.52678 4.40215 8.46447 3.46447C9.40215 2.52678 10.6739 2 12 2C13.3261 2 14.5979 2.52678 15.5355 3.46447C16.4732 4.40215 17 5.67392 17 7V11" stroke="#fbbc04" strokeWidth="2" />
+            </svg>
+            <div>
+              <h4>端到端加密</h4>
+              <p>Seal 技術保護您的隱私</p>
+            </div>
+          </div>
+          <div className="user-feature-item">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#ea4335" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M2 17L12 22L22 17" stroke="#ea4335" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M2 12L12 17L22 12" stroke="#ea4335" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <div>
+              <h4>完全掌控</h4>
+              <p>只有您能存取您的資料</p>
+            </div>
+          </div>
         </div>
 
         {!isConnected ? (

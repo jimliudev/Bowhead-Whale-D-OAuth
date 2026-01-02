@@ -1,5 +1,90 @@
 /* User Page - Minimalist Design */
 
+/* Hero Section */
+.user-hero {
+  text-align: center;
+  padding: 3rem 2rem 2rem;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.user-hero-icon {
+  margin: 0 auto 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-hero-title {
+  font-size: 2.25rem;
+  font-weight: 600;
+  color: #1d1d1f;
+  margin: 0 0 0.5rem 0;
+  letter-spacing: -0.02em;
+}
+
+.user-hero-subtitle {
+  font-size: 1rem;
+  color: #86868b;
+  margin: 0 0 1rem 0;
+  font-weight: 400;
+}
+
+.user-hero-description {
+  font-size: 1.0625rem;
+  color: #5f6368;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.user-hero-description strong {
+  color: #1d1d1f;
+  font-weight: 600;
+}
+
+/* Features */
+.user-features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  max-width: 960px;
+  margin: 2rem auto 3rem;
+  padding: 0 2rem;
+}
+
+.user-feature-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: #f8f9fa;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.user-feature-item:hover {
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.user-feature-item svg {
+  flex-shrink: 0;
+}
+
+.user-feature-item h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1d1d1f;
+  margin: 0 0 0.25rem 0;
+}
+
+.user-feature-item p {
+  font-size: 0.875rem;
+  color: #5f6368;
+  margin: 0;
+  line-height: 1.4;
+}
+
 .user-form {
   max-width: 100%;
 }
@@ -200,6 +285,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -221,6 +307,7 @@
     transform: translateY(20px);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;

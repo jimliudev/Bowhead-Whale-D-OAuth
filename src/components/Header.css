@@ -47,6 +47,20 @@
   text-overflow: ellipsis;
 }
 
+.project-name {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1d1d1f;
+  text-decoration: none;
+  letter-spacing: -0.01em;
+  transition: color 0.2s ease;
+  white-space: nowrap;
+}
+
+.project-name:hover {
+  color: #0071e3;
+}
+
 .header-link {
   color: #0071e3;
   text-decoration: none;
@@ -133,6 +147,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -156,6 +171,7 @@
     opacity: 0;
     transform: translateY(20px) scale(0.95);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -312,4 +328,3 @@
     padding: 1.25rem 1.5rem 2rem;
   }
 }
-
