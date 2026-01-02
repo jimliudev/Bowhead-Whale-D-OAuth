@@ -1,30 +1,13 @@
 import { useState, useMemo, useEffect } from 'react'
-import {
-  useCurrentAccount,
-  useSignAndExecuteTransaction,
-  useCurrentWallet,
-} from '@mysten/dapp-kit'
-import { getFullnodeUrl } from '@mysten/sui/client'
-import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc';
-import { walrus } from '@mysten/walrus'
 import { SessionKey } from '@mysten/seal'
 import { SealService } from '../services/sealService'
 import { contractService } from '../services/contractService'
 import { walrusApiService } from '../services/walrusApiService'
 import { SEAL_PACKAGE_ID } from '../config'
+import { useTransactionExecution } from '../hooks/useTransactionExecution'
 import Header from '../components/Header'
 import './css/PageLayout.css'
 import './css/UserPage.css'
-
-
-const suiClient = new SuiJsonRpcClient({
-  url: getFullnodeUrl('testnet'),
-  network: 'testnet',
-}).$extend(
-  walrus({
-    wasmUrl: 'https://unpkg.com/@mysten/walrus-wasm@latest/web/walrus_wasm_bg.wasm',
-  }),
-);
 
 interface DataVaultWithItems {
   vaultId: string
@@ -109,34 +92,18 @@ export default function UserPage() {
     }
   }, [])
 
-  const currentAccount = useCurrentAccount()
-  const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction()
-  const { currentWallet } = useCurrentWallet()
+  // 使用新的 transaction execution hook
+  const {
+    executeTransaction,
+    signPersonalMessage,
+    isUsingZkLogin,
+    currentAccount,
+    currentWallet,
+    suiClient,
+  } = useTransactionExecution()
+
   const isConnected = Boolean(currentAccount)
   const sealService = useMemo(() => new SealService(), [])
-
-  // Sign personal message for SessionKey
-  const signPersonalMessage = async (message: Uint8Array): Promise<string> => {
-    if (!currentWallet || !currentAccount) {
-      throw new Error('Wallet not connected')
-    }
-
-    try {
-      // Use wallet's signPersonalMessage feature
-      const signPersonalMessageFeature = currentWallet.features['sui:signPersonalMessage']
-      if (signPersonalMessageFeature) {
-        const result = await signPersonalMessageFeature.signPersonalMessage({
-          message,
-          account: currentAccount,
-        })
-        return result.signature
-      }
-      throw new Error('Wallet does not support signPersonalMessage')
-    } catch (err: any) {
-      console.error('Sign personal message error:', err)
-      throw new Error(`Failed to sign message: ${err?.message || 'Unknown error'}`)
-    }
-  }
 
   // State
   const [vaults, setVaults] = useState<DataVaultWithItems[]>([])
@@ -323,9 +290,8 @@ export default function UserPage() {
         groupName: newVaultName.trim(),
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       const maxRetries = 5
       const retryDelay = 2000 // 2 seconds
@@ -489,9 +455,8 @@ export default function UserPage() {
         nonce,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Item creation result:', result)
 
@@ -707,9 +672,8 @@ export default function UserPage() {
         itemId: selectedItem.itemId,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Item deletion result:', result)
 
@@ -908,9 +872,8 @@ export default function UserPage() {
         newBlobId,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Item update result:', result)
 
@@ -1006,9 +969,8 @@ export default function UserPage() {
         vaultId: selectedVaultForDelete.vaultId,
       })
 
-      const result = await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const result = await executeTransaction(tx)
 
       console.log('Vault deletion result:', result)
 
@@ -1197,9 +1159,8 @@ export default function UserPage() {
         newBlobId,
       })
 
-      await signAndExecuteTransaction({
-        transaction: tx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      await executeTransaction(tx)
 
       // Store new blobObjectId
       if (newBlobObjectId) {
@@ -1261,9 +1222,8 @@ export default function UserPage() {
         groupName: 'Basic',
       })
 
-      const vaultResult = await signAndExecuteTransaction({
-        transaction: vaultTx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const vaultResult = await executeTransaction(vaultTx)
 
       // Wait for transaction to be indexed on chain
       setStatus('Waiting for transaction to be indexed...')
@@ -1345,9 +1305,8 @@ export default function UserPage() {
         nonce,
       })
 
-      const itemResult = await signAndExecuteTransaction({
-        transaction: itemTx as any,
-      })
+      // 使用條件式交易執行（自動判斷 zkLogin）
+      const itemResult = await executeTransaction(itemTx)
 
       // Store blobObjectId mapping
       if (blobObjectId) {
