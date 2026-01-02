@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   useCurrentAccount,
-  useWallets,
-  useConnectWallet,
   useDisconnectWallet,
   useCurrentWallet,
+  ConnectButton,
 } from '@mysten/dapp-kit'
 import './Header.css'
 
@@ -26,23 +25,8 @@ export default function Header({ title, backTo = '/', backLabel = 'Back', rightL
   const { currentWallet } = useCurrentWallet()
   const { mutate: disconnect } = useDisconnectWallet()
   const [showSettings, setShowSettings] = useState(false)
-  const [showLoginModal, setShowLoginModal] = useState(false)
 
-  const { mutate: connect } = useConnectWallet();
-  const wallets = useWallets();
 
-  // 調試：顯示所有可用的錢包
-  console.log('🔍 All available wallets:', wallets.map(w => ({ name: w.name, features: Object.keys(w.features) })));
-
-  // 過濾出登入相關的錢包（名稱包含 "Sign in"）
-  const authWallets = wallets.filter(w => w.name.includes('Sign in'));
-  console.log('🍄 Auth wallets found:', authWallets.map(w => w.name));
-
-  const googleWallet = authWallets.find(w => w.name.includes('Google'));
-  const facebookWallet = authWallets.find(w => w.name.includes('Facebook'));
-
-  console.log('✅ Google wallet:', googleWallet?.name || 'NOT FOUND');
-  console.log('✅ Facebook wallet:', facebookWallet?.name || 'NOT FOUND');
 
   const isConnected = Boolean(currentAccount)
   const isLandingPage = location.pathname === '/'
@@ -51,9 +35,7 @@ export default function Header({ title, backTo = '/', backLabel = 'Back', rightL
     return null
   }
 
-  const handleLogin = (wallet: any) => {
-    connect({ wallet });
-  };
+
 
   return (
     <>
@@ -99,141 +81,14 @@ export default function Header({ title, backTo = '/', backLabel = 'Back', rightL
                   </button>
                 </>
               ) : (
-                <button
-                  className="btn btn-primary"
-                  onClick={() => setShowLoginModal(true)}
-                  style={{
-                    padding: '8px 16px',
-                    fontSize: '14px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    backgroundColor: '#4285f4',
-                    color: 'white',
-                    cursor: 'pointer',
-                    fontWeight: '600',
-                  }}
-                >
-                  Login
-                </button>
+                <ConnectButton />
               )}
             </div>
           </div>
         </div>
       </header>
 
-      {/* Login Modal */}
-      {showLoginModal && (
-        <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">🍄 Login</h2>
-              <button
-                className="modal-close"
-                onClick={() => setShowLoginModal(false)}
-                aria-label="Close"
-              >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </div>
 
-            <div className="modal-body">
-              <p style={{ textAlign: 'center', marginBottom: '20px', color: '#718096' }}>
-                使用 Web2 登入方式體驗 Sui 區塊鏈
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                {googleWallet && (
-                  <button
-                    onClick={() => { setShowLoginModal(false); handleLogin(googleWallet); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '12px',
-                      padding: '16px 24px',
-                      fontSize: '16px',
-                      fontWeight: '600',
-                      border: 'none',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      color: 'white',
-                      backgroundColor: '#4285f4',
-                    }}
-                  >
-                    <svg width="24" height="24" viewBox="0 0 24 24">
-                      <path
-                        fill="currentColor"
-                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                      />
-                      <path
-                        fill="currentColor"
-                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                      />
-                    </svg>
-                    使用 Google 登入
-                  </button>
-                )}
-
-                {facebookWallet && (
-                  <button
-                    onClick={() => handleLogin(facebookWallet)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '12px',
-                      padding: '16px 24px',
-                      fontSize: '16px',
-                      fontWeight: '600',
-                      border: 'none',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      color: 'white',
-                      backgroundColor: '#1877f2',
-                    }}
-                  >
-                    <svg width="24" height="24" viewBox="0 0 24 24">
-                      <path
-                        fill="currentColor"
-                        d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
-                      />
-                    </svg>
-                    使用 Facebook 登入
-                  </button>
-                )}
-
-                {!googleWallet && !facebookWallet && (
-                  <div style={{
-                    textAlign: 'center',
-                    padding: '20px',
-                    backgroundColor: '#fff3cd',
-                    borderRadius: '12px',
-                    color: '#856404',
-                  }}>
-                    <p>⚠️ 沒有可用的登入選項</p>
-                    <p style={{ fontSize: '14px', marginTop: '8px' }}>
-                      請確認已在 Enoki Portal 設定 OAuth 提供者
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div >
-      )
-      }
 
       {/* Settings Modal */}
       {

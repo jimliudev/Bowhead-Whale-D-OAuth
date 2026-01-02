@@ -6,6 +6,57 @@ import './css/PageLayout.css'
 import './css/ThirdPartyServicePage.css'
 
 export default function ThirdPartyServicePage() {
+  // OAuth callback 處理 - 偵測 URL hash 中的 id_token 並處理 popup 關閉
+  useEffect(() => {
+    const hash = window.location.hash;
+
+    // 檢查是否是 OAuth callback（URL 包含 id_token）
+    if (hash && hash.includes('id_token=')) {
+      console.log('ThirdPartyServicePage: Detected OAuth callback with id_token');
+      console.log('window.opener exists:', !!window.opener);
+
+      // 如果是 popup 視窗，通知父視窗並關閉
+      if (window.opener && !window.opener.closed) {
+        try {
+          console.log('ThirdPartyServicePage: This is a popup window, sending callback to opener');
+
+          // 將 OAuth 結果傳給父視窗
+          window.opener.postMessage(
+            {
+              type: 'enoki-oauth-callback',
+              hash: hash,
+              url: window.location.href,
+            },
+            window.location.origin
+          );
+
+          // 延遲關閉，確保訊息已傳遞
+          setTimeout(() => {
+            console.log('ThirdPartyServicePage: Closing popup window');
+            window.close();
+          }, 300);
+
+          return; // 不繼續執行其他邏輯
+        } catch (e) {
+          console.error('Failed to communicate with opener:', e);
+          // 即使通訊失敗也嘗試關閉
+          setTimeout(() => window.close(), 300);
+          return;
+        }
+      } else {
+        // 不是 popup，這是正常的頁面導航
+        console.log('ThirdPartyServicePage: Not a popup, cleaning up URL hash');
+
+        // 清理 URL hash
+        if (window.history.replaceState) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+
+        // 繼續正常的頁面邏輯
+      }
+    }
+  }, []);
+
   // 使用新的 transaction execution hook
   const {
     executeTransaction,

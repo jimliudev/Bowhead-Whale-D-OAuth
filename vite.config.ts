@@ -24,10 +24,6 @@ export default defineConfig({
   },
   // 配置服務器，允許加載 WASM 文件
   server: {
-    // headers: {
-    //   'Cross-Origin-Embedder-Policy': 'credentialless',
-    //   'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',  // 允許 popup
-    // },
   },
 })
 
