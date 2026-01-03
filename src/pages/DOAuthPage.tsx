@@ -29,8 +29,12 @@ export default function DOAuthPage() {
   const { currentWallet } = useCurrentWallet()
   const { mutateAsync: signAndExecuteTransaction } = useSignAndExecuteTransaction()
   const { mutate: disconnect } = useDisconnectWallet()
-  
-  const serviceAddress = searchParams.get('service')
+
+  // Get service address from URL parameter or sessionStorage
+  const urlServiceAddress = searchParams.get('service')
+  const sessionServiceAddress = sessionStorage.getItem('oauth_service_id')
+  const serviceAddress = urlServiceAddress || sessionServiceAddress
+
   const isConnected = Boolean(currentAccount)
   const [showSettings, setShowSettings] = useState(false)
 
@@ -76,8 +80,8 @@ export default function DOAuthPage() {
         if (serviceInfoData && Array.isArray(serviceInfoData) && serviceInfoData.length > 0) {
           // Find the service that matches the serviceAddress
           const matchedService = serviceInfoData.find(
-            (service: any) => 
-              service.objectId === serviceAddress || 
+            (service: any) =>
+              service.objectId === serviceAddress ||
               service.fields?.id?.id === serviceAddress
           ) || serviceInfoData[0] // Fallback to first item if no match
 
@@ -116,7 +120,7 @@ export default function DOAuthPage() {
     const fetchUserData = async () => {
       try {
         setStatus('Loading your data items...')
-        
+
         // Use new method that works with shared DataVault and Data objects
         const dataItems = await contractService.getUserDataItemsViaVaultCaps(
           suiClient,
@@ -137,7 +141,7 @@ export default function DOAuthPage() {
         setStatus('')
         console.log('✅ Loaded data items:', transformedItems.length)
         console.log('transformedItems', transformedItems)
-        
+
         if (transformedItems.length === 0) {
           console.log('💡 No data items found. Please create some data first.')
         }
@@ -167,7 +171,7 @@ export default function DOAuthPage() {
     1: 'Edit',
     2: 'Delete',
   }
-  
+
 
   const handleResourceToggle = (resourceId: string) => {
     setSelectedResources((prev) => {
@@ -299,13 +303,13 @@ export default function DOAuthPage() {
         transaction: tx as any,
       })
 
-     
+
       setError(null) // Clear any previous errors
       setStatus('✅ Authorization successful!')
-      
+
       // Set authorization success last to ensure all other states are set first
       setAuthorizationSuccess(true)
-      
+
       console.log('States set, should show success page now. authorizationSuccess:', true)
     } catch (err: any) {
       const errorMsg = err?.message || err?.toString() || 'Authorization failed'
@@ -418,9 +422,9 @@ export default function DOAuthPage() {
               <div className="oauth-success-icon-wrapper">
                 <div className="oauth-success-icon">
                   <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="32" cy="32" r="32" fill="#34C759" opacity="0.1"/>
-                    <path d="M32 8C18.745 8 8 18.745 8 32s10.745 24 24 24 24-10.745 24-24S45.255 8 32 8zm0 44c-11.046 0-20-8.954-20-20S20.954 12 32 12s20 8.954 20 20-8.954 20-20 20z" fill="#34C759"/>
-                    <path d="M26 32l6 6 10-10" stroke="#34C759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                    <circle cx="32" cy="32" r="32" fill="#34C759" opacity="0.1" />
+                    <path d="M32 8C18.745 8 8 18.745 8 32s10.745 24 24 24 24-10.745 24-24S45.255 8 32 8zm0 44c-11.046 0-20-8.954-20-20S20.954 12 32 12s20 8.954 20 20-8.954 20-20 20z" fill="#34C759" />
+                    <path d="M26 32l6 6 10-10" stroke="#34C759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
               </div>
@@ -448,8 +452,8 @@ export default function DOAuthPage() {
                     <>
                       <svg className="oauth-button-spinner" width="20" height="20" viewBox="0 0 20 20" fill="none">
                         <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="31.416" strokeDashoffset="31.416">
-                          <animate attributeName="stroke-dasharray" dur="2s" values="0 31.416;15.708 15.708;0 31.416;0 31.416" repeatCount="indefinite"/>
-                          <animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416;-31.416" repeatCount="indefinite"/>
+                          <animate attributeName="stroke-dasharray" dur="2s" values="0 31.416;15.708 15.708;0 31.416;0 31.416" repeatCount="indefinite" />
+                          <animate attributeName="stroke-dashoffset" dur="2s" values="0;-15.708;-31.416;-31.416" repeatCount="indefinite" />
                         </circle>
                       </svg>
                       <span>Processing...</span>
@@ -458,7 +462,7 @@ export default function DOAuthPage() {
                     <>
                       <span>Generate Access Token</span>
                       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                        <path d="M7.5 15L12.5 10L7.5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M7.5 15L12.5 10L7.5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </>
                   )}
@@ -519,7 +523,7 @@ export default function DOAuthPage() {
                 )}
               </div>
             </div>
-            
+
             <div className="oauth-header-actions">
               {!isConnected ? (
                 <div className="oauth-connect-section">
@@ -538,8 +542,8 @@ export default function DOAuthPage() {
                     aria-label="Settings"
                   >
                     <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M10 12.5C11.3807 12.5 12.5 11.3807 12.5 10C12.5 8.61929 11.3807 7.5 10 7.5C8.61929 7.5 7.5 8.61929 7.5 10C7.5 11.3807 8.61929 12.5 10 12.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M16.25 10C16.1574 10.8696 15.9651 11.7246 15.6783 12.5458L17.5 15.4167L15.4167 17.5L12.5458 15.6783C11.7246 15.9651 10.8696 16.1574 10 16.25C9.13038 16.1574 8.27542 15.9651 7.45417 15.6783L4.58333 17.5L2.5 15.4167L4.32167 12.5458C4.03493 11.7246 3.84264 10.8696 3.75 10C3.84264 9.13038 4.03493 8.27542 4.32167 7.45417L2.5 4.58333L4.58333 2.5L7.45417 4.32167C8.27542 4.03493 9.13038 3.84264 10 3.75C10.8696 3.84264 11.7246 4.03493 12.5458 4.32167L15.4167 2.5L17.5 4.58333L15.6783 7.45417C15.9651 8.27542 16.1574 9.13038 16.25 10Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M10 12.5C11.3807 12.5 12.5 11.3807 12.5 10C12.5 8.61929 11.3807 7.5 10 7.5C8.61929 7.5 7.5 8.61929 7.5 10C7.5 11.3807 8.61929 12.5 10 12.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M16.25 10C16.1574 10.8696 15.9651 11.7246 15.6783 12.5458L17.5 15.4167L15.4167 17.5L12.5458 15.6783C11.7246 15.9651 10.8696 16.1574 10 16.25C9.13038 16.1574 8.27542 15.9651 7.45417 15.6783L4.58333 17.5L2.5 15.4167L4.32167 12.5458C4.03493 11.7246 3.84264 10.8696 3.75 10C3.84264 9.13038 4.03493 8.27542 4.32167 7.45417L2.5 4.58333L4.58333 2.5L7.45417 4.32167C8.27542 4.03493 9.13038 3.84264 10 3.75C10.8696 3.84264 11.7246 4.03493 12.5458 4.32167L15.4167 2.5L17.5 4.58333L15.6783 7.45417C15.9651 8.27542 16.1574 9.13038 16.25 10Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </button>
                 </div>
@@ -560,7 +564,7 @@ export default function DOAuthPage() {
                     {serviceInfo.resourceTypes.map((type: number, index: number) => (
                       <li key={index} className="permission-item">
                         <svg className="permission-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
-                          <path d="M16.6667 5L7.50004 14.1667L3.33337 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          <path d="M16.6667 5L7.50004 14.1667L3.33337 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                         <span>{resourceTypeLabels[type] || `Type ${type}`} your data</span>
                       </li>
@@ -585,8 +589,8 @@ export default function DOAuthPage() {
                       {userDataItems.map((item) => {
                         const isSelected = selectedResources.hasOwnProperty(item.id)
                         return (
-                          <div 
-                            key={item.id} 
+                          <div
+                            key={item.id}
                             className={`resource-item-container ${isSelected ? 'resource-item-selected' : ''}`}
                             onClick={() => !loading && handleResourceToggle(item.id)}
                             style={{ cursor: loading ? 'not-allowed' : 'pointer' }}
@@ -612,8 +616,8 @@ export default function DOAuthPage() {
                                 <div className="permission-options">
                                   <div className={`permission-option ${isSelected ? 'permission-option-active' : ''}`}>
                                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                      <path d="M8 2.667C4.667 2.667 2 5.333 2 8.667s2.667 6 6 6 6-2.667 6-6-2.667-6-6-6zm0 10.667c-2.573 0-4.667-2.094-4.667-4.667S5.427 4 8 4s4.667 2.094 4.667 4.667S10.573 13.333 8 13.333z" fill="currentColor"/>
-                                      <path d="M8 6c-1.467 0-2.667 1.2-2.667 2.667h1.333c0-.733.6-1.333 1.333-1.333s1.333.6 1.333 1.333H10.667C10.667 7.2 9.467 6 8 6z" fill="currentColor"/>
+                                      <path d="M8 2.667C4.667 2.667 2 5.333 2 8.667s2.667 6 6 6 6-2.667 6-6-2.667-6-6-6zm0 10.667c-2.573 0-4.667-2.094-4.667-4.667S5.427 4 8 4s4.667 2.094 4.667 4.667S10.573 13.333 8 13.333z" fill="currentColor" />
+                                      <path d="M8 6c-1.467 0-2.667 1.2-2.667 2.667h1.333c0-.733.6-1.333 1.333-1.333s1.333.6 1.333 1.333H10.667C10.667 7.2 9.467 6 8 6z" fill="currentColor" />
                                     </svg>
                                     <span>View</span>
                                   </div>
@@ -660,8 +664,8 @@ export default function DOAuthPage() {
                       !serviceInfo
                         ? 'Service info not loaded'
                         : Object.keys(selectedResources).length === 0
-                        ? 'Please select at least one resource'
-                        : 'Click to authorize'
+                          ? 'Please select at least one resource'
+                          : 'Click to authorize'
                     }
                   >
                     {loading ? 'Authorizing...' : 'Authorize'}
@@ -698,7 +702,7 @@ export default function DOAuthPage() {
                 aria-label="Close"
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             </div>

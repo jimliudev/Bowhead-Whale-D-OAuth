@@ -310,12 +310,12 @@ export default function ThirdPartyServicePage() {
                 <label>OAuth Authorization Link</label>
                 <div className="oauth-link-container">
                   <div className="oauth-code-box oauth-link-box">
-                    {window.location.origin}/bowheadwhale/doauth_page?service={registeredService.serviceId}
+                    {window.location.origin}/bowheadwhale/redirect_doauth_page?service={registeredService.serviceId}
                   </div>
                   <button
                     className="oauth-copy-btn"
                     onClick={() => {
-                      const link = `${window.location.origin}/bowheadwhale/doauth_page?service=${registeredService.serviceId}`
+                      const link = `${window.location.origin}/bowheadwhale/redirect_doauth_page?service=${registeredService.serviceId}`
                       navigator.clipboard.writeText(link)
                       alert('Link copied to clipboard!')
                     }}
