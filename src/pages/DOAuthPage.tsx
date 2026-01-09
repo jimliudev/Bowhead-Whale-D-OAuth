@@ -639,7 +639,16 @@ export default function DOAuthPage() {
                 <div className="oauth-footer">
                   <button
                     className="oauth-button oauth-button-secondary"
-                    onClick={() => window.history.back()}
+                    onClick={() => {
+                      // Try to close window first (if opened by script)
+                      window.close()
+                      // If window.close() doesn't work, fallback to history.back()
+                      setTimeout(() => {
+                        if (!window.closed) {
+                          window.history.back()
+                        }
+                      }, 100)
+                    }}
                     disabled={loading}
                   >
                     Cancel

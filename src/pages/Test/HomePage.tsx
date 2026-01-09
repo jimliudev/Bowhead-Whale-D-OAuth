@@ -37,7 +37,7 @@ export default function HomePage() {
   const { mutate: disconnect } = useDisconnectWallet()
   const wallets = useWallets()
   const { currentWallet } = useCurrentWallet()
-  
+
   const isConnected = Boolean(currentAccount)
   const [inputText, setInputText] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -71,11 +71,11 @@ export default function HomePage() {
     try {
       setWalletError(null)
       setStatus('正在連接錢包...')
-      
+
       if (wallets.length > 0) {
         connect({ wallet: wallets[0] })
         setStatus('✅ 錢包連接成功！')
-        setTimeout(() => setStatus(''), 3000)
+        setTimeout(() => setStatus(''), 3001)
       } else {
         setWalletError('未檢測到 Sui 錢包。請安裝 Sui Wallet 擴展。')
         setStatus('')
@@ -116,17 +116,17 @@ export default function HomePage() {
         setSuiBalance((Number(totalSui) / 1e9).toFixed(4))
 
         const walCoinType = '0x8190b041122eb492bf63cb464476bd68c6b7e570a4079645a8b28732b6197a82::wal::WAL'
-        
+
         try {
           const walCoins = await suiClient.getCoins({
             owner: currentAccount.address,
             coinType: walCoinType,
           })
-          
+
           const totalWal = walCoins.data.reduce((sum, coin) => sum + BigInt(coin.balance), 0n)
           const walBalanceNum = Number(totalWal) / 1e9
           setWalBalance(walBalanceNum.toFixed(4))
-          
+
           if (walCoins.data.length > 1) {
             console.warn(`⚠️ 檢測到 ${walCoins.data.length} 個 WAL coin，可能存在碎片化問題`)
           }
@@ -149,7 +149,7 @@ export default function HomePage() {
     if (file) {
       setSelectedFile(file)
       setError(null)
-      
+
       if (file.type.startsWith('image/')) {
         const reader = new FileReader()
         reader.onload = (e) => {
@@ -191,22 +191,22 @@ export default function HomePage() {
     if (data[0] === 0xFF && data[1] === 0xD8 && data[2] === 0xFF) {
       return { type: 'image/jpeg', extension: 'jpg' }
     }
-    
+
     if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4E && data[3] === 0x47 &&
-        data[4] === 0x0D && data[5] === 0x0A && data[6] === 0x1A && data[7] === 0x0A) {
+      data[4] === 0x0D && data[5] === 0x0A && data[6] === 0x1A && data[7] === 0x0A) {
       return { type: 'image/png', extension: 'png' }
     }
-    
+
     if (data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x38) {
       return { type: 'image/gif', extension: 'gif' }
     }
-    
+
     if (data.length >= 12 &&
-        data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 &&
-        data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50) {
+      data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 &&
+      data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50) {
       return { type: 'image/webp', extension: 'webp' }
     }
-    
+
     if (data[0] === 0x42 && data[1] === 0x4D) {
       return { type: 'image/bmp', extension: 'bmp' }
     }
@@ -233,7 +233,7 @@ export default function HomePage() {
       setError('請輸入要上傳的文本')
       return
     }
-    
+
     if (uploadMode === 'file' && !selectedFile) {
       setError('請選擇要上傳的文件')
       return
@@ -269,14 +269,14 @@ export default function HomePage() {
         fileName = selectedFile.name
         fileType = selectedFile.type
       }
-      
+
       const { blobId, blobObject } = await suiClient.walrus.writeBlob({
         blob: fileData,
         deletable: true,
         epochs: 3,
         signer: keypair,
       })
-      
+
       console.log('Blob ID:', blobId)
       console.log('Blob Object:', blobObject)
       console.log('File Info:', { fileName, fileType, size: fileData.length })
@@ -284,7 +284,7 @@ export default function HomePage() {
       setStatus('驗證上傳狀態...')
       try {
         const readBlob = await suiClient.walrus.readBlob({ blobId })
-        
+
         if (uploadMode === 'text') {
           const readText = new TextDecoder().decode(readBlob)
           if (readText === inputText) {
@@ -329,7 +329,7 @@ export default function HomePage() {
 
   const handleDownloadAndDecrypt = async () => {
     const blobIdToDownload = blobIdInput.trim() || encryptedBlobRef
-    
+
     if (!blobIdToDownload) {
       setError('請輸入 Blob ID 或先上傳數據')
       return
@@ -347,11 +347,11 @@ export default function HomePage() {
     try {
       setStatus('正在讀取 Blob...')
       const blobBytes = await suiClient.walrus.readBlob({ blobId: blobIdToDownload })
-      
+
       setStatus('數據已下載，開始解析...')
-      
+
       const fileTypeInfo = detectFileType(blobBytes)
-      
+
       if (fileTypeInfo.type.startsWith('image/')) {
         setDownloadedFile({
           name: `image_${blobIdToDownload.slice(0, 8)}.${fileTypeInfo.extension}`,
@@ -406,10 +406,10 @@ export default function HomePage() {
             </Link>
           </div>
         </div>
-        <div style={{ 
-          marginBottom: '1rem', 
-          padding: '0.75rem', 
-          backgroundColor: 'rgba(255, 193, 7, 0.1)', 
+        <div style={{
+          marginBottom: '1rem',
+          padding: '0.75rem',
+          backgroundColor: 'rgba(255, 193, 7, 0.1)',
           border: '1px solid rgba(255, 193, 7, 0.3)',
           borderRadius: '8px',
           fontSize: '0.9rem'
@@ -425,8 +425,8 @@ export default function HomePage() {
           {!isConnected ? (
             <div>
               <ConnectButton />
-              <button 
-                onClick={handleConnect} 
+              <button
+                onClick={handleConnect}
                 className="btn btn-primary"
                 style={{ marginTop: '1rem' }}
               >
@@ -479,7 +479,7 @@ export default function HomePage() {
         {/* 加密和上傳 */}
         <div className="section">
           <h2>1. 上傳數據到 Walrus</h2>
-          
+
           {/* 上傳模式選擇 */}
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
             <button
@@ -546,7 +546,7 @@ export default function HomePage() {
                   borderRadius: '4px',
                 }}
               />
-              
+
               {/* 文件信息 */}
               {selectedFile && (
                 <div style={{
@@ -579,7 +579,7 @@ export default function HomePage() {
                       清除
                     </button>
                   </div>
-                  
+
                   {/* 圖片預覽 */}
                   {filePreview && (
                     <div style={{ marginTop: '1rem' }}>
@@ -676,7 +676,7 @@ export default function HomePage() {
         {(decryptedText || downloadedFile) && (
           <div className="section">
             <h2>下載結果</h2>
-            
+
             {/* 文本結果 */}
             {decryptedText && (
               <div className="result-box">
@@ -694,7 +694,7 @@ export default function HomePage() {
                   <strong>大小:</strong> {(downloadedFile.data.length / 1024).toFixed(2)} KB<br />
                   <strong>類型:</strong> {downloadedFile.type}
                 </p>
-                
+
                 {/* 如果是圖片，顯示預覽 */}
                 {downloadedFile.type.startsWith('image/') && (
                   <div style={{ marginTop: '1rem' }}>
